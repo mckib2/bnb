@@ -14,6 +14,14 @@ def simplex(c, A, b):
     .. [1] https://personal.utdallas.edu/~scniu/OPRE-6201/documents/LP06-Simplex-Tableau.pdf
     '''
 
+    # Make sure we are working with numpy stuffs
+    A = np.array(A)
+    assert A.ndim == 2, 'A must 2 dimensional!'
+    b = np.array(b)
+    assert b.squeeze().ndim == 1, 'b must be column vector!'
+    c = np.array(c)
+    assert c.squeeze().ndim == 1, 'c must be column vector!'
+
     # Sanity checks
     m, n = A.shape[:]
     assert b.size == m, 'b should be same size as A.shape[0]!'
