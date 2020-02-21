@@ -100,6 +100,82 @@ class TestSimplex(unittest.TestCase):
         fopt = 343
         self.assertTrue(np.allclose(x, res['x']))
         self.assertTrue(np.allclose(fopt, res['fopt'] - 125))
+
+    def test_1994_UG_exam(self):
+        '''Example problem from [3]_.'''
+        c = [20 - 10*13/60 - 2*20/60, 30 - 10*19/60 - 2*29/60]
+        A = [
+            [13, 19],
+            [20, 29],
+            [-1, 0]
+        ]
+        b = [40*60, 35*60, -10]
+        res = simplex(c, A, b)
+
+        x = np.array([10, 65.52])
+        fopt = 1866.5
+        self.assertTrue(np.allclose(x, res['x']))
+        self.assertTrue(np.allclose(fopt, res['fopt']))
+
+    def test_1992_UG_exam(self):
+        '''Example problem from [3]_.'''
+        c = [3, 5]
+        A = [
+            [12, 25],
+            [.4, -1],
+        ]
+        b = [30*60, 0]
+        res = simplex(c, A, b)
+
+        x = np.array([81.8, 32.7])
+        fopt = 408.9
+        xres = np.around(res['x'], decimals=1)
+        self.assertTrue(np.allclose(x, xres))
+        self.assertTrue(np.allclose(fopt, np.array(c).T @ xres))
+
+    def test_1988_UG_exam(self):
+        '''Example problem from [3]_.'''
+        c = [-10, -11]
+        A = [
+            [-1, -1],
+            [1, -1],
+            [-7, -12],
+        ]
+        b = [-11, 5, -35]
+        res = simplex(c, A, b)
+
+        x = np.array([8, 3])
+        fopt = 113
+        self.assertTrue(np.allclose(x, res['x']))
+        self.assertTrue(np.allclose(fopt, -1*res['fopt']))
+
+    def test_1987_UG_exam(self):
+        '''Example problem from [3]_.'''
+        c = [5, 6]
+        A = [
+            [1, 1],
+            [-1, 1],
+            [5, 4],
+        ]
+        b = [10, -3, 35]
+        res = simplex(c, A, b)
+
+        x = np.array([47/9, 20/9])
+        fopt = 355/9
+        self.assertTrue(np.allclose(x, res['x']))
+        self.assertTrue(np.allclose(fopt, res['fopt']))
+
+    def test_1986_UG_exam(self):
+        '''Example problem from [3]_.'''
+        c = [30, 10]
+        A = [
+            [6, 3],
+            [3, -1], # Works without this constraint
+            [1, 1/4],
+        ]
+        b = [40, 0, 4]
+        res = simplex(c, A, b)
+        print(res)
         
 if __name__ == '__main__':
     unittest.main()
