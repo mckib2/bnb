@@ -1,11 +1,20 @@
-'''Try simplex again.'''
+'''Pure Python implementation of simplex algorithm.'''
 
 from tabulate import tabulate
 
 class Tableau:
-    '''Tableau class.'''
+    '''Simplex tableau.
 
-    def __init__(self, c, A_ub=[], b_ub=[], A_eq=[], b_eq=[], A_lb=[], b_lb=[], disp=False):
+    Explicitly track simplex tableau.
+    '''
+
+    def __init__(
+            self, c,
+            A_ub=[], b_ub=[],
+            A_eq=[], b_eq=[],
+            A_lb=[], b_lb=[],
+            disp=False):
+        '''Solve the linear program.'''
 
         self.c = c
         self.A_ub = A_ub
@@ -330,12 +339,37 @@ class Tableau:
             tablefmt='orgtbl',
             floatfmt=".1f") + '\n'
 
-def simplex(c, A_ub=[], b_ub=[], A_eq=[], b_eq=[], A_lb=[], b_lb=[], disp=False):
-    '''Simplex pass to Tableau class.'''
+def simplex(
+        c,
+        A_ub=[], b_ub=[],
+        A_eq=[], b_eq=[],
+        A_lb=[], b_lb=[],
+        disp=False):
+    '''Solve a linear program using the simplex method.
+
+    Parameters
+    ----------
+    c : list
+        Objective coefficients.
+    A_ub, b_ub : list of lists, list
+        Less than or equal constraints.
+    A_eq, b_eq : list of lists, list
+        Equality constraints.
+    A_lb, b_lb : list of lists, list
+        Greater than or equal constraints.
+    disp : bool, optional
+        Show the tableau at each pivot.
+
+    Notes
+    -----
+    Explicitly enumerates tableau.
+
+    Will transform all inequality and equality constraints into
+    standard form and solve using the two phase simplex algorithm.
+    '''
 
     t = Tableau(c, A_ub, b_ub, A_eq, b_eq, A_lb, b_lb, disp=disp)
     return t.solution()
-        
-        
+
 if __name__ == '__main__':
     pass
