@@ -471,7 +471,16 @@ class TestSimplex(unittest.TestCase):
             A_lb=[list(i) for i in zip(*A_ub)],
             b_lb=c,
         )
-        print(dres)
-        
+
+        # Make sure both solutions agree
+        self.assertEqual(
+            [round(u0, 9) for u0 in res['dual']],
+            [round(x0, 9) for x0 in dres['x']]
+        )
+        self.assertEqual(
+            [round(x0, 9) for x0 in res['x']],
+            [round(u0, 9) for u0 in dres['dual']]
+        )
+
 if __name__ == '__main__':
     unittest.main()
