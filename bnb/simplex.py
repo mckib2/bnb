@@ -184,7 +184,6 @@ class Tableau:
                 self.nhdr_row+self.nobjective_row, self.num_rows) if self.tableau[ii][pivot_col] > 0]
         if len(ratios) == 0:
             print(self)
-            print(self.tableau[1][6])
             raise ValueError('Unbounded solution!')
         _min_ratio, pivot_row = min(ratios, key=lambda x0: x0[0])
 
