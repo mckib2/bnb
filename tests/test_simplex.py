@@ -10,6 +10,9 @@ References
 .. [6] https://faculty.math.illinois.edu/~mlavrov/docs/482-fall-2019/lecture6.pdf
 .. [7] http://web.mit.edu/15.053/www/AMP-Chapter-02.pdf
 .. [8] https://nptel.ac.in/content/storage2/courses/105108127/pdf/Module_3/M3L4_LN.pdf
+.. [9] https://faculty.math.illinois.edu/~mlavrov/docs/482-fall-2019/lecture13.pdf
+.. [10] https://ocw.ehu.eus/pluginfile.php/8161/mod_resource/content/1/3_Duality.pdf
+.. [11] https://web.stanford.edu/~ashishg/msande111/notes/chapter4.pdf
 '''
 
 import unittest
@@ -354,5 +357,121 @@ class TestSimplex(unittest.TestCase):
         self.assertEqual(x, res['x'])
         self.assertEqual(fopt, res['fopt'])
 
+    def test_symmetric_dual(self):
+        '''Extract dual solution from tableau when prob has A_ub only.
+        
+        Uses example prob from pg 1 of [9]_.
+        '''
+        c = [2, 3]
+        A_ub = [
+            [-1, 1],
+            [1, -2],
+            [3, 4],
+        ]
+        b_ub = [3, 2, 26]
+        res = simplex(c=c, A_ub=A_ub, b_ub=b_ub)
+
+        # Make sure primal solution is correct
+        x = [2, 5]
+        s = [0, 10, 0]
+        fopt = 19
+        self.assertEqual(x, res['x'])
+        self.assertEqual(s, res['slack'])
+        self.assertEqual(fopt, res['fopt'])
+        
+        # Round to resolve small differences
+        dig = 8
+        ures = [round(u0, dig) for u0 in res['dual']]
+        u = [round(1/7, dig), 0, round(5/7, dig)]
+        self.assertEqual(u, ures)
+
+    def test_symmetric_dual2(self):
+        '''Try another dual from pg 104 of [10]_.'''
+        c = [3, 1, -2]
+        A_ub = [
+            [1, 2, 1],
+            [2, -1, 3],
+        ]
+        b_ub = [5, 4]
+        res = simplex(c, A_ub=A_ub, b_ub=b_ub)
+
+        # Make sure primal is correct
+        x = [13/5, 6/5, 0]
+        s = [0, 0]
+        fopt = 9
+        self.assertEqual(x, res['x'])
+        self.assertEqual(s, res['slack'])
+        self.assertEqual(fopt, res['fopt'])
+
+        # Now make sure dual is correct
+        u = [1, 1]
+        self.assertEqual(u, res['dual'])
+
+    def test_dual_with_A_ub_and_A_lb(self):
+        '''Try a dual with multiple kinds of constraints from [10]_.'''
+        c = [-1, -2]
+        A_ub = [
+            [4, 3],
+        ]
+        b_ub = [12]
+        A_lb = [
+            [1, 3],
+            [2, 1],
+        ]
+        b_lb = [6, 4]
+        res = simplex(
+            c=c,
+            A_ub=A_ub, b_ub=b_ub,
+            A_lb=A_lb, b_lb=b_lb,
+        )
+
+        # Make sure primal checks out
+        x = [6/5, 8/5]
+        s = [12/5, 0, 0]
+        fopt = 22/5
+        self.assertEqual(x, res['x'])
+        self.assertEqual(s, [round(s0, 8) for s0 in res['slack']])
+        self.assertEqual(fopt, -1*res['fopt'])
+
+        # Check dual
+        u = [0, 3/5, 1/5]
+        self.assertEqual(u, res['dual'])
+
+    def test_primal_dual_equality(self):
+        '''Example from stanford [11]_.'''
+        c = [3, 2.5]
+        A_ub = [
+            [4.44, 0],
+            [0, 6.67],
+            [4, 2.86],
+            [3, 6],
+        ]
+        b_ub = [100, 100, 100, 100]
+        res = simplex(c=c, A_ub=A_ub, b_ub=b_ub)
+        print(res)
+
+        # Round do precision given in ref
+        xres = [round(x0, 1) for x0 in res['x']]
+        fres = round(res['fopt'], 1)
+
+        # Make sure primal is good
+        x = [20.4, 6.5]
+        fopt = 77.3
+        self.assertEqual(x, xres)
+        self.assertEqual(fopt, fres)
+
+        # Check dual while we're at it
+        ures = [round(u0, 3) for u0 in res['dual']]
+        u = [0, 0, .681, .092]
+        self.assertEqual(u, ures)
+
+        # Solve the dual directly
+        dres = simplex(
+            c=[-1*b0 for b0 in b_ub],
+            A_lb=[list(i) for i in zip(*A_ub)],
+            b_lb=c,
+        )
+        print(dres)
+        
 if __name__ == '__main__':
     unittest.main()
