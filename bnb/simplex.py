@@ -160,7 +160,7 @@ class Tableau:
         '''Find the current objective function value.'''
         return self.tableau[self.nhdr_row][-1]
             
-    def pivot(self):
+    def pivot(self, tol=1e-8):
         '''Perform a pivot.'''
 
         # Check out starting state
@@ -169,7 +169,8 @@ class Tableau:
         
         # Check exit conditions
         obj_row = self.tableau[self.nhdr_row][self.nbasic_var_labels:-self.nrhs_col]
-        is_neg = [val < 0 for val in obj_row]
+        # use tol to make sure value is not just slightly negative, i.e., basically 0
+        is_neg = [val < 0 and abs(val) > tol for val in obj_row]
         if not any(is_neg):
             return True # we're done!
 
@@ -182,6 +183,8 @@ class Tableau:
             (self.tableau[ii][-1]/self.tableau[ii][pivot_col], ii) for ii in range(
                 self.nhdr_row+self.nobjective_row, self.num_rows) if self.tableau[ii][pivot_col] > 0]
         if len(ratios) == 0:
+            print(self)
+            print(self.tableau[1][6])
             raise ValueError('Unbounded solution!')
         _min_ratio, pivot_row = min(ratios, key=lambda x0: x0[0])
 
@@ -326,10 +329,19 @@ class Tableau:
             else:
                 raise ValueError('Got unexpected basic variable label: %s' % v)
 
+        # Extract the dual solution from the tableau
+        # TODO: I only know how to do this for symmetric dual problems (only A_ub constraints)
+        # TODO: Seems like it works for A_lb constraints as well?
+        dual = None
+        if self.num_artificial == 0:# and self.num_surplus == 0:
+            # Dual values are in the objective col for slack vars
+            dual = self.tableau[self.nhdr_row][self.nbasic_var_labels+self.num_vars:-1]
+
         return {
             'fopt': fopt,
             'x': x,
             'slack': s,
+            'dual': dual,
         }
             
     def __repr__(self):        
@@ -366,6 +378,8 @@ def simplex(
 
     Will transform all inequality and equality constraints into
     standard form and solve using the two phase simplex algorithm.
+
+    Assumes all variables are non-negative.
     '''
 
     t = Tableau(c, A_ub, b_ub, A_eq, b_eq, A_lb, b_lb, disp=disp)
