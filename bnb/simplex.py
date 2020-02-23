@@ -371,6 +371,21 @@ def simplex(
     disp : bool, optional
         Show the tableau at each pivot.
 
+    Returns
+    -------
+    res : dict
+    
+        - x : list
+            Solution for the variables that maximize c @ x.
+        - slack : list
+            Slack variable values at the optimum.
+        - fopt : float
+            Objective value at the optimum.
+        - dual : list or None
+            Dual variable values at the optimum. These are provided
+            only when there are no equality constraints, i.e.,
+            A_eq=[] and b_eq=[].
+
     Notes
     -----
     Explicitly enumerates tableau.
