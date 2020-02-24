@@ -1,29 +1,36 @@
 #include <vector>
 #include <stack>
+#include <string>
 #include <algorithm>
 #include <functional>
+#include <iterator>
 #include <assert.h>
+#include <iostream>
+
 #include "simplex.hpp"
 
 namespace simplex {
 
   template<class T>
-  Simplex<T>::Simplex(const std::vector<T> c,
-		      const std::vector<std::vector<T> > A_ub, const std::vector<T> b_ub,
-		      const std::vector<std::vector<T> > A_eq, const std::vector<T> b_eq,
-		      const std::vector<std::vector<T> > A_lb, const std::vector<T> b_lb,
-		      const bool solve_dual)
-    : solve_dual(false)
+  Simplex<T>::Simplex(const std::vector<T> c_,
+		      const std::vector<std::vector<T> > A_ub_, const std::vector<T> b_ub_,
+		      const std::vector<std::vector<T> > A_eq_, const std::vector<T> b_eq_,
+		      const std::vector<std::vector<T> > A_lb_, const std::vector<T> b_lb_,
+		      const bool solve_dual_)
   {
+
+    // May be computationally advantageous to solve dual instead of primal
+    this->solve_dual = solve_dual_;
+    assert(!this->solve_dual); // we don't do this yet
     
     // Store copy of coefficients and constraints
-    this->c = std::vector<T>(c);
-    this->A_ub = std::vector<std::vector<T> >(A_ub);
-    this->A_eq = std::vector<std::vector<T> >(A_eq);
-    this->A_lb = std::vector<std::vector<T> >(A_lb);
-    this->b_ub = std::vector<T>(b_ub);
-    this->b_eq = std::vector<T>(b_eq);
-    this->b_lb = std::vector<T>(b_lb);
+    this->c = std::vector<T>(c_);
+    this->A_ub = std::vector<std::vector<T> >(A_ub_);
+    this->A_eq = std::vector<std::vector<T> >(A_eq_);
+    this->A_lb = std::vector<std::vector<T> >(A_lb_);
+    this->b_ub = std::vector<T>(b_ub_);
+    this->b_eq = std::vector<T>(b_eq_);
+    this->b_lb = std::vector<T>(b_lb_);
 
     // Go ahead and make RHS all non-negative. No longer trust function
     // arguments to have correct constraints after this! Use Simplex::A_ub, etc.
@@ -47,16 +54,134 @@ namespace simplex {
     this->make_hdrs();
 
     // Maybe fill in tableau before FBS?
+    this->fill_initial_tableau();
     
     // Get an intitial feasible solution
     this->initial_fbs();
   }
 
   template<class T>
-  void Simplex<T>::initial_fbs() {
-    
+  inline std::size_t Simplex<T>::hdr_var_start_idx() {
+    return 1; // 'basic' is first entry
+  }
+
+  template<class T>
+  inline std::size_t Simplex<T>::hdr_slack_start_idx() {
+    return this->hdr_var_start_idx() + this->num_vars;
+  }
+
+  template<class T>
+  inline std::size_t Simplex<T>::hdr_surplus_start_idx() {
+    return this->hdr_slack_start_idx() + this->num_slack;
   }
   
+  template<class T>
+  inline std::size_t Simplex<T>::hdr_artificial_start_idx() {
+    return this->hdr_surplus_start_idx() + this->num_surplus;
+  }
+  
+  template<class T>
+  void Simplex<T>::initial_fbs() {
+
+    // First entry of the basis labels is reserved for objective row
+    this->basis.push_back("obj");
+    
+    // Get a feasible solution by setting slack to RHS for A_ub
+    std::copy_n(std::next(this->hdrs.cbegin(), this->hdr_slack_start_idx()),
+		this->num_slack,
+		std::back_inserter(this->basis));
+
+    // Set artificial to RHS for A_eq (because surplus is negative)
+    std::copy_n(std::next(this->hdrs.cbegin(), this->hdr_artificial_start_idx()),
+		this->num_surplus,
+		std::back_inserter(this->basis));
+
+    // Set artificial to RHS for A_lb
+    std::copy_n(std::next(this->hdrs.cbegin(), this->hdr_artificial_start_idx() + this->num_surplus),
+		this->num_artificial - this->num_surplus,
+		std::back_inserter(this->basis));
+
+  }
+  
+  template<class T>
+  void Simplex<T>::fill_initial_tableau() {
+
+    // Do objective row
+    auto obj_row_idx = this->obj_row_start_idx();
+    std::copy(this->c.cbegin(), this->c.cend(), this->tableau[obj_row_idx].begin());
+    transform_n(this->tableau[obj_row_idx].cbegin(),
+		this->num_vars,
+		this->tableau[obj_row_idx].begin(),
+		std::negate<T>());
+
+    // leq constraints
+    auto slack_col = this->slack_col_start_idx();
+    auto rhs_col = this->rhs_col_idx();
+    zip3(this->A_ub.cbegin(),
+	 this->A_ub.cend(),
+	 this->b_ub.cbegin(),
+	 this->tableau.begin() + this->A_ub_row_start_idx(),
+	 [&slack_col, rhs_col](const auto & Ael, const auto & bel, auto & tableau_row) {
+
+	   // Copy coefficients from A_ub to tableau
+	   std::copy(Ael.cbegin(), Ael.cend(), tableau_row.begin());
+
+	   // Include slack variable for each constraint
+	   tableau_row[slack_col] = 1;
+
+	   // Copy RHS value for this constraint
+	   tableau_row[rhs_col] = bel;
+
+	   // Increment slack col
+	   slack_col++;
+	 });
+
+    // eq constraints
+    auto artificial_col = this->artificial_col_start_idx();
+    zip3(this->A_eq.cbegin(),
+	 this->A_eq.cend(),
+	 this->b_eq.cbegin(),
+	 this->tableau.begin() + this->A_eq_row_start_idx(),
+	 [&artificial_col, rhs_col](const auto & Ael, const auto & bel, auto & tableau_row) {
+
+	   // Copy coefficients from A_eq to tableau
+	   std::copy(Ael.cbegin(), Ael.cend(), tableau_row.begin());
+
+	   // Include artificial variable for each constraint
+	   tableau_row[artificial_col] = 1;
+
+	   // Copy RHS value for this constraint
+	   tableau_row[rhs_col] = bel;
+
+	   // Increment artificial col
+	   artificial_col++;
+	 });
+
+    // geq constraints
+    auto surplus_col = this->surplus_col_start_idx();
+    zip3(this->A_lb.cbegin(),
+	 this->A_lb.cend(),
+	 this->b_lb.cbegin(),
+	 this->tableau.begin() + this->A_lb_row_start_idx(),
+	 [&surplus_col, &artificial_col, rhs_col](const auto & Ael, const auto & bel, auto & tableau_row) {
+
+	   // Copy coefficients from A_eq to tableau
+	   std::copy(Ael.cbegin(), Ael.cend(), tableau_row.begin());
+
+	   // Include surplus and artificial variable
+	   tableau_row[surplus_col] = -1;
+	   tableau_row[artificial_col] = 1;
+
+	   // Copy RHS value for this constraint
+	   tableau_row[rhs_col] = bel;
+
+	   // Increment cols
+	   surplus_col++;
+	   artificial_col++;
+	 });
+
+  }
+
   template<class T>
   void Simplex<T>::make_hdrs() {
 
@@ -65,23 +190,23 @@ namespace simplex {
         
     // Start with variables that appear in objective function,
     // then do slack, surplus, and artificial
-    for (auto ii = 0; ii < this->num_vars; ++ii) {
-      this->hdrs.push_back("x" + std::string(ii));
+    for (std::size_t ii = 0; ii < this->num_vars; ++ii) {
+      this->hdrs.push_back("x" + std::to_string(ii));
     }
-    for (auto ii = 0; ii < this->num_slack; ++ii) {
-      this->hdrs.push_back("sl" + std::string(ii));
+    for (std::size_t ii = 0; ii < this->num_slack; ++ii) {
+      this->hdrs.push_back("sl" + std::to_string(ii));
     }
-    for (auto ii = 0; ii < this->num_surplus; ++ii) {
-      this->hdrs.push_back("su" + std::string(ii));
+    for (std::size_t ii = 0; ii < this->num_surplus; ++ii) {
+      this->hdrs.push_back("su" + std::to_string(ii));
     }
-    for (auto ii = 0; ii < this->num_artificial; ++ii) {
-      this->hdrs.push_back("a" + std::string(ii));
+    for (std::size_t ii = 0; ii < this->num_artificial; ++ii) {
+      this->hdrs.push_back("a" + std::to_string(ii));
     }
     // End with RHS
     this->hdrs.push_back("RHS");
 
     // Did we get all of them?
-    assert(this->hdrs.size() == this->num_cols());
+    assert(this->hdrs.size() - this->num_basic_label_cols == this->num_cols());
   }
   
   template<class T>
@@ -154,43 +279,133 @@ namespace simplex {
   
   template<class T>
   void Simplex<T>::allocate_tableau() {
-    this->tableau(this->num_rows(), std::vector<T>(this->num_cols()));
+    this->tableau.resize(this->num_rows(), std::vector<T>(this->num_cols()));
   }
 
   template<class T>
-  std::size_t Simplex<T>::num_rows() {
+  inline std::size_t Simplex<T>::num_rows() {
     return this->num_obj_rows +
       this->num_slack +
       this->num_artificial;
   }
 
   template<class T>
-  std::size_t Simplex<T>::obj_row_start_idx() {
+  inline std::size_t Simplex<T>::num_cols() {
+    return this->num_vars +
+      this->num_slack +
+      this->num_surplus +
+      this->num_artificial +
+      this->num_rhs_cols;
+  }
+
+  template<class T>
+  inline std::size_t Simplex<T>::obj_row_start_idx() {
     return this->num_obj_rows - 1;
   }
 
   template<class T>
-  std::size_t Simplex<T>::phase1_obj_row_idx() {
+  inline std::size_t Simplex<T>::phase1_obj_row_idx() {
     return this->obj_row_start_idx() - 1;
   }
 
   template<class T>
-  std::size_t Simplex<T>::rhs_col_idx() {
+  inline std::size_t Simplex<T>::rhs_col_idx() {
     return this->num_cols() - 1;
   }
 
   template<class T>
-  T Simplex<T>::get_obj_val() {
+  inline T Simplex<T>::get_obj_val() {
     return this->tableau[this->obj_row_start_idx()][this->rhs_col_idx()];
   }
 
   template<class T>
-  T Simplex<T>::get_phase1_obj_val() {
+  inline T Simplex<T>::get_phase1_obj_val() {
     return this->tableau[this->phase1_obj_row_idx()][this->rhs_col_idx()];
   }
   
+  template<class T>
+  inline std::size_t Simplex<T>::A_ub_row_start_idx() {
+    return this->obj_row_start_idx() + this->num_obj_rows;
+  }
+
+  template<class T>
+  inline std::size_t Simplex<T>::A_eq_row_start_idx() {
+    return this->A_ub_row_start_idx() + this->b_ub.size();
+  }
+
+  template<class T>
+  inline std::size_t Simplex<T>::A_lb_row_start_idx() {
+    return this->A_eq_row_start_idx() + this->b_eq.size();
+  }
+
+  template<class T>
+  inline std::size_t Simplex<T>::slack_col_start_idx() {
+    return this->num_vars;
+  }
+
+  template<class T>
+  inline std::size_t Simplex<T>::surplus_col_start_idx() {
+    return this->slack_col_start_idx() + this->num_slack;
+  }
+  
+  template<class T>
+  inline std::size_t Simplex<T>::artificial_col_start_idx() {
+    return this->surplus_col_start_idx() + this->num_surplus;
+  }
+
+  template<class T>
+  inline std::size_t Simplex<T>::slack_col_by_A_ub_row(std::size_t row_idx) {
+    return this->slack_col_start_idx() + row_idx;
+  }
+
+  template<class T>
+  void Simplex<T>::show() {
+
+    // Spit out header
+    for (const auto & el : this->hdrs) {
+      std::cout << el << ' ';
+    }
+    std::cout << '\n';
+
+    // Spit out table underneath
+    zip2(this->tableau.cbegin(),
+	 this->tableau.cend(),
+	 this->basis.cbegin(),
+	 [](const auto & row, const auto & row_hdr) {
+	   std::cout << row_hdr << ' ';
+	   for (const auto & col : row) {
+	     std::cout << col << ' ';
+	   }
+	   std::cout << '\n';
+	 });
+    std::cout << std::endl; // flush
+  }
 }
 
+
 int main() {
+
+  auto c = std::vector<double>({3, 5});
+
+  auto A_ub = std::vector<std::vector<double> >();
+  A_ub.push_back(std::vector<double>({0, 1}));
+  auto b_ub = std::vector<double>({6});
+
+  auto A_eq = std::vector<std::vector<double> >();
+  A_eq.push_back(std::vector<double>({3, 2}));
+  auto b_eq = std::vector<double>({18});
+
+  auto A_lb = std::vector<std::vector<double> >();
+  A_lb.push_back(std::vector<double>({3, 5}));
+  auto b_lb = std::vector<double>({2});
+
+  auto s = simplex::Simplex<double>(c,
+				    A_ub, b_ub,
+				    A_eq, b_eq,
+				    A_lb, b_lb,
+				    false);
+
+  s.show();
+  
   return 0;
 }
