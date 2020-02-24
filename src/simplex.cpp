@@ -4,7 +4,7 @@
 #include <algorithm>
 #include <functional>
 #include <iterator>
-#include <assert.h>
+#include <assert.h> // assert
 #include <iostream>
 
 #include "simplex.hpp"
@@ -57,7 +57,68 @@ namespace simplex {
     this->fill_initial_tableau();
     
     // Get an intitial feasible solution
-    this->initial_fbs();
+    this->label_initial_fbs();
+
+  }
+
+  template<class T>
+  void Simplex<T>::solve() {
+
+    // Keep pivoting till we can't pivot no more!
+    // break to get out of loop
+    while (true) {
+
+      // Check exit conditions
+      auto obj_row_idx = this->obj_row_start_idx();
+      auto & tol = this->tolerance;
+      if (std::all_of(this->tableau[obj_row_idx].cbegin(),
+		      std::prev(this->tableau[obj_row_idx].cend(), 1), // don't include RHS
+		      [tol](const auto & el) {
+			return el >= 0 || -1*el < tol;
+		      })) {
+	// All objective row elements are positive, we're done!
+	break;
+      }
+		      
+      // Choose incoming variable from strictly negative objective cols
+      auto min_it = std::min_element(this->tableau[obj_row_idx].cbegin(),
+				     std::prev(this->tableau[obj_row_idx].cend(), 1)); // don't include RHS
+      assert(*min_it < 0);
+      auto pivot_col = std::distance(this->tableau[obj_row_idx].cbegin(), min_it);
+      
+      // Choose the outgoing variable using ratio test.
+      // If we store references to column major tableau we could get these easier
+      auto ratios = std::vector<std::pair<std::size_t, T> >();
+      auto rhs_col_idx = this->rhs_col_idx();
+      std::size_t idx = 0;
+      for (const auto & row : this->tableau) {
+	if (row[pivot_col] > 0) {
+	  ratios.push_back(std::make_pair(idx, row[rhs_col_idx]/row[pivot_col]));
+	}
+	idx++;
+      }
+      if (ratios.size() == 0) {
+	std::cout << "Unbounded solution!" << std::endl;
+	break;
+      }
+      auto ratio_min_it = std::min_element(ratios.cbegin(),
+					   ratios.cend(),
+					   [](const auto & a, const auto & b) -> bool {
+					     return std::get<1>(a) < std::get<1>(b);
+					   });
+      auto pivot_row = std::get<0>(*ratio_min_it);
+      
+      // Do the pivot
+      if (this->pivot(pivot_row, pivot_col)) {
+	break;
+      }
+    }
+  }
+  
+  template<class T>
+  bool Simplex<T>::pivot(const std::size_t row_idx, const std::size_t col_idx) {
+    // TODO
+    return row_idx + col_idx;
   }
 
   template<class T>
@@ -81,7 +142,7 @@ namespace simplex {
   }
   
   template<class T>
-  void Simplex<T>::initial_fbs() {
+  void Simplex<T>::label_initial_fbs() {
 
     // First entry of the basis labels is reserved for objective row
     this->basis.push_back("obj");
@@ -406,6 +467,8 @@ int main() {
 				    false);
 
   s.show();
+
+  s.solve();
   
   return 0;
 }

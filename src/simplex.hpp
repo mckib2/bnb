@@ -51,14 +51,20 @@ namespace simplex {
     std::vector<std::string> hdrs;
     std::vector<std::string> basis;
     std::vector<std::vector<T> > tableau;
+
+    // I think vector<unique_ptr<T> > would be a better data structure
+    // for tableau.  You could store references to RHS that would not
+    // change when modifiying vectors which would speed out ratio
+    // tests.
     
     // Functions that do work:
     void make_rhs_nonnegative(void);
     void allocate_tableau(void);
     void make_hdrs(void);
     void fill_initial_tableau(void);
-    void initial_fbs(void);
+    void label_initial_fbs(void);
     bool pivot(const std::size_t row_idx, const std::size_t col_idx);
+    void solve(void);
     void add_phase1_obj(void);
     void initial_fbs_before_phase1(void);
     void remove_artificial_vars(void);
