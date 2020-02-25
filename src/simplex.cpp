@@ -41,6 +41,9 @@ namespace simplex {
     this->num_surplus = this->b_lb.size();
     this->num_artificial = this->num_surplus + this->b_eq.size();
 
+    // We have a two phase problem if we got artificial variables
+    this->two_phase = this->num_artificial > 0;
+    
     // Table specific stuff
     this->num_obj_rows = 1;
     
@@ -58,15 +61,62 @@ namespace simplex {
     
     // Get an intitial feasible solution
     this->label_initial_fbs();
-
   }
 
   template<class T>
   void Simplex<T>::solve() {
 
+    // Solve the phase 1 problem if we need to
+    if (this->two_phase) {
+      
+      // Change the problem to minimize sum of artificial variables
+      auto phase1_c = std::vector<T>(this->num_cols());
+      std::fill_n(std::next(phase1_c.begin(), this->artificial_col_start_idx()), this->num_artificial, 1);
+
+      // Add the new objective row to the top -- we now have two objective functions we're tracking!
+      this->tableau.insert(this->tableau.cbegin(), phase1_c);
+      this->num_obj_rows++;
+      this->basis.insert(this->basis.cbegin(), "phase1");
+
+      // Since we have no negatives in the objective row, use artificial variable rows to
+      // eliminate entries in the objective column
+      auto pivot_row = this->num_rows() - this->num_artificial;
+      for (auto ii = this->artificial_col_start_idx(); ii < this->rhs_col_idx(); ++ii) {
+	this->pivot(pivot_row, ii);
+	pivot_row++;
+      }
+
+      // Solve the phase 1 problem
+      this->two_phase = false;
+      this->solve();
+
+      // If we get an objective value other than 0, problem is infeasible
+      if (this->get_obj_val() != 0) {
+	std::cout << "There is no solution!" << std::endl;
+	return;
+      }
+
+      // Now solve phase 2 by removing artificial variable columns and phase 1 objective row
+      this->tableau.erase(this->tableau.cbegin());
+      this->basis.erase(this->basis.cbegin());
+      this->num_obj_rows--;
+      for (auto & row : this->tableau) {
+	row.erase(std::next(row.cbegin(), this->rhs_col_idx() - this->num_artificial),
+		  std::prev(row.cend(), 1));
+      }
+      this->hdrs.erase(std::next(this->hdrs.cbegin(), this->rhs_col_idx() - this->num_artificial + this->hdr_var_start_idx()),
+		       std::prev(this->hdrs.cend(), 1));
+      this->num_artificial = 0;
+
+      // Can solve the phase 2 problem as normal
+    }
+    
     // Keep pivoting till we can't pivot no more!
     // break to get out of loop
     while (true) {
+
+      // Take a look
+      this->show();
 
       // Check exit conditions
       auto obj_row_idx = this->obj_row_start_idx();
@@ -109,16 +159,38 @@ namespace simplex {
       auto pivot_row = std::get<0>(*ratio_min_it);
       
       // Do the pivot
-      if (this->pivot(pivot_row, pivot_col)) {
-	break;
-      }
+      this->pivot(pivot_row, pivot_col);
     }
   }
   
   template<class T>
-  bool Simplex<T>::pivot(const std::size_t row_idx, const std::size_t col_idx) {
-    // TODO
-    return row_idx + col_idx;
+  void Simplex<T>::pivot(const std::size_t pivot_row, const std::size_t pivot_col) {
+
+    // Update the basic variable labels with the incoming variable
+    this->basis[pivot_row] = this->hdrs[this->hdr_var_start_idx() + pivot_col];
+   
+    // Pivot! Pivot row divided by pivot value
+    auto pivot_val = this->tableau[pivot_row][pivot_col];
+    std::transform(this->tableau[pivot_row].cbegin(),
+		   this->tableau[pivot_row].cend(),
+		   this->tableau[pivot_row].begin(),
+		   [pivot_val](const auto & el) {
+		     return el/pivot_val;
+		   });
+
+    // Now use pivot row to remove remaining entries in the pivot col
+    for (std::size_t ii = 0; ii < this->num_rows(); ++ii) {
+      if (ii == pivot_row) {
+	continue;
+      }
+      auto val = this->tableau[ii][pivot_col];
+      zip2(this->tableau[pivot_row].cbegin(),
+	   this->tableau[pivot_row].cend(),
+	   this->tableau[ii].begin(),
+	   [val](const auto & el1, auto & el2) {
+	     el2 -= val*el1;
+	   });
+    }    
   }
 
   template<class T>
@@ -346,8 +418,9 @@ namespace simplex {
   template<class T>
   inline std::size_t Simplex<T>::num_rows() {
     return this->num_obj_rows +
-      this->num_slack +
-      this->num_artificial;
+      this->b_ub.size() +
+      this->b_eq.size() +
+      this->b_lb.size();
   }
 
   template<class T>
@@ -361,12 +434,12 @@ namespace simplex {
 
   template<class T>
   inline std::size_t Simplex<T>::obj_row_start_idx() {
-    return this->num_obj_rows - 1;
+    return 0; // Always start at beginning
   }
 
   template<class T>
   inline std::size_t Simplex<T>::phase1_obj_row_idx() {
-    return this->obj_row_start_idx() - 1;
+    return this->obj_row_start_idx() + 1; // always the second obj
   }
 
   template<class T>

@@ -63,7 +63,7 @@ namespace simplex {
     void make_hdrs(void);
     void fill_initial_tableau(void);
     void label_initial_fbs(void);
-    bool pivot(const std::size_t row_idx, const std::size_t col_idx);
+    void pivot(const std::size_t pivot_row, const std::size_t pivot_col);
     void solve(void);
     void add_phase1_obj(void);
     void initial_fbs_before_phase1(void);
