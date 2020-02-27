@@ -1,13 +1,14 @@
 #ifndef SIMPLEX_HPP
 #define SIMPLEX_HPP
 
-#include <memory>
+//#include <memory>
 #include <vector>
 #include <algorithm>
 #include <string>
 
 namespace simplex {
 
+  /*
   template<class T>
   class Solution {
   public:
@@ -16,10 +17,12 @@ namespace simplex {
     std::unique_ptr<T> dual;
     T fobj;
   };
+  */
   
   template<class T>
   class Simplex {
   public:
+    Simplex();
     explicit Simplex(const std::vector<T> c_,
 		     const std::vector<std::vector<T> > A_ub_, const std::vector<T> b_ub_,
 		     const std::vector<std::vector<T> > A_eq_, const std::vector<T> b_eq_,
@@ -91,19 +94,19 @@ namespace simplex {
 
     T get_obj_val(void);
     T get_phase1_obj_val(void);
-    std::unique_ptr<std::string> get_basis(void);
-    std::unique_ptr<T> get_vars(void);
-    std::unique_ptr<T> get_slack_vars(void);
-    std::unique_ptr<T> get_surplus_vars(void);
-    std::unique_ptr<T> get_artificial_vars(void);
-    std::unique_ptr<T> get_row(const std::size_t row_idx);
-    std::unique_ptr<T> get_col(const std::size_t col_idx);
-    std::size_t get_idx_of_most_neg_in_col(const std::size_t col_idx);
-    std::size_t get_idx_of_most_neg_in_row(const std::size_t row_idx);
-    std::size_t get_idx_of_most_neg_ratio(const std::size_t row_idx, const std::size_t col_idx);
-    void normalize_row(const std::size_t row_idx);
-    void add_rows(const std::size_t row1_idx, const std::size_t row2_idx, const T row1_mult, const T row2_mult);
-    std::size_t get_num_neg_in_row(const std::size_t row_idx, const bool use_tol);
+    //std::unique_ptr<std::string> get_basis(void);
+    //std::unique_ptr<T> get_vars(void);
+    //std::unique_ptr<T> get_slack_vars(void);
+    //std::unique_ptr<T> get_surplus_vars(void);
+    //std::unique_ptr<T> get_artificial_vars(void);
+    //std::unique_ptr<T> get_row(const std::size_t row_idx);
+    //std::unique_ptr<T> get_col(const std::size_t col_idx);
+    //std::size_t get_idx_of_most_neg_in_col(const std::size_t col_idx);
+    //std::size_t get_idx_of_most_neg_in_row(const std::size_t row_idx);
+    //std::size_t get_idx_of_most_neg_ratio(const std::size_t row_idx, const std::size_t col_idx);
+    //void normalize_row(const std::size_t row_idx);
+    //void add_rows(const std::size_t row1_idx, const std::size_t row2_idx, const T row1_mult, const T row2_mult);
+    //std::size_t get_num_neg_in_row(const std::size_t row_idx, const bool use_tol);
     void show(void);
     
   };
@@ -116,8 +119,14 @@ namespace simplex {
 
   template <typename InputIt1, typename InputIt2, typename InputIt3, typename BinaryOperation>
   void zip3(InputIt1 first1, InputIt1 last1, InputIt2 first2, InputIt3 first3, BinaryOperation binOp) {
-    while (first1 != last1) binOp(*first1++, *first2++, *first3);
+    while (first1 != last1) binOp(*first1++, *first2++, *first3++);
   }
+
+  template <typename InputIt1, typename InputIt2, typename InputIt3, typename InputIt4, typename BinaryOperation>
+  void zip4(InputIt1 first1, InputIt1 last1, InputIt2 first2, InputIt3 first3, InputIt4 first4, BinaryOperation binOp) {
+    while (first1 != last1) binOp(*first1++, *first2++, *first3++, *first4++);
+  }
+
   
   template<typename _InputIterator,
 	   typename _OutputIterator,

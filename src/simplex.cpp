@@ -253,7 +253,7 @@ namespace simplex {
     zip3(this->A_ub.cbegin(),
 	 this->A_ub.cend(),
 	 this->b_ub.cbegin(),
-	 this->tableau.begin() + this->A_ub_row_start_idx(),
+	 std::next(this->tableau.begin(), this->A_ub_row_start_idx()),
 	 [&slack_col, rhs_col](const auto & Ael, const auto & bel, auto & tableau_row) {
 
 	   // Copy coefficients from A_ub to tableau
@@ -265,7 +265,7 @@ namespace simplex {
 	   // Copy RHS value for this constraint
 	   tableau_row[rhs_col] = bel;
 
-	   // Increment slack col
+	   // Move to next slack col
 	   slack_col++;
 	 });
 
@@ -514,9 +514,15 @@ namespace simplex {
 	 });
     std::cout << std::endl; // flush
   }
+
+  // Explicit template instantiations to make sure we only work with numeric types
+  template class Simplex<float>;
+  template class Simplex<double>;
+  template class Simplex<long double>;
+
 }
 
-
+/*
 int main() {
 
   auto c = std::vector<double>({3, 5});
@@ -545,3 +551,4 @@ int main() {
   
   return 0;
 }
+*/
