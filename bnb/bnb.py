@@ -20,8 +20,13 @@ class Node:
     def __init__(self, c, A_ub, b_ub, A_eq, b_eq, bounds):
         self.id = self.take_num()
         self.c = c.copy()
-        self.A_ub = A_ub.copy()
-        self.b_ub = b_ub.copy()
+
+        if A_ub is not None:
+            self.A_ub = A_ub.copy()
+            self.b_ub = b_ub.copy()
+        else:
+            self.A_ub = None
+            self.b_ub = None
 
         if A_eq is not None:
             self.A_eq = A_eq.copy()
@@ -226,7 +231,7 @@ class BNB:
         return self.exhausted_test()
 
 
-def intprog(c, A_ub, b_ub, A_eq=None, b_eq=None, bounds=None, binary=False, real_valued=None, method='bnb'):
+def intprog(c, A_ub=None, b_ub=None, A_eq=None, b_eq=None, bounds=None, binary=False, real_valued=None, method='bnb'):
     '''Integer program solver.
 
     Parameters
@@ -244,21 +249,27 @@ def intprog(c, A_ub, b_ub, A_eq=None, b_eq=None, bounds=None, binary=False, real
 
     # Input matrices are assumed from here on out to be numpy arrays
     c = np.array(c)
-    A_ub = np.array(A_ub)
-    b_ub = np.array(b_ub)
+    if c.ndim > 1:
+        logging.warning('Flattening coefficient vector!')
+        c = np.flatten(c)
+
+    if A_ub is not None and b_eq is not None:
+        A_ub = np.array(A_ub)
+        b_ub = np.array(b_ub)
+        if A_ub.ndim != 2:
+            raise ValueError('Inequality constraint matrix should be 2D array!')
+        if b_ub.ndim > 1:
+            logging.warning('Flattening inequality constraint vector!')
+            b_ub = np.flatten(b_ub)
 
     if A_eq is not None and b_eq is not None:
         A_eq = np.array(A_eq)
         b_eq = np.array(b_eq)
-
-    if c.ndim > 1:
-        logging.warning('Flattening coefficient vector!')
-        c = np.flatten(c)
-    if A_ub.ndim != 2:
-        raise ValueError('Inequality constraint matrix should be 2D array!')
-    if b_ub.ndim > 1:
-        logging.warning('Flattening inequality constraint vector!')
-        b = np.flatten(b)
+        if A_eq.ndim != 2:
+            raise ValueError('Inequality constraint matrix should be 2D array!')
+        if b_eq.ndim > 1:
+            logging.warning('Flattening inequality constraint vector!')
+            b_eq = np.flatten(b_eq)
 
     # Add bounds for binary
     if binary:
