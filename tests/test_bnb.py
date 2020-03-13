@@ -11,6 +11,7 @@ References
 .. [7] https://www.isical.ac.in/~arijit/courses/autumn2016/ILP-Lecture-1.pdf
 .. [8] https://ncss-wpengine.netdna-ssl.com/wp-content/themes/ncss/pdf/Procedures/NCSS/Mixed_Integer_Programming.pdf
 .. [9] https://www.cs.upc.edu/~erodri/webpage/cps/theory/lp/milp/slides.pdf
+.. [10] https://www.mathworks.com/help/optim/ug/mixed-integer-linear-programming-basics.html
 '''
 
 import unittest
@@ -150,6 +151,21 @@ class TestProblems(unittest.TestCase):
         res = intprog(c, A, b)
         self.assertEqual(res['x'].tolist(), [1, 2])
         self.assertEqual(res['fun'], 3)
+
+    def test_prob12(self):
+        '''MIP example from [10]_.'''
+        c = [350*5, 330*3, 310*4, 280*6, 500, 450, 400, 100]
+        A = [
+            [5, 3, 4, 6, 1, 1, 1, 1],
+            [5*0.05, 3*0.04, 4*0.05, 6*0.03, 0.08, 0.07, 0.06, 0.03],
+            [5*0.03, 3*0.03, 4*0.04, 6*0.04, 0.06, 0.07, 0.08, 0.09],
+        ]
+        b = [25, 1.25, 1.25]
+        bnds = [(0, 1)]*4 + [(0, None)]*4
+        rv = [False]*4 + [True]*4
+        res = intprog(c, A_eq=A, b_eq=b, real_valued=rv, bounds=bnds)
+        self.assertTrue(np.allclose(res['x'], [1, 1, 0, 1, 7.25, 0, .25, 3.5]))
+        self.assertTrue(np.allclose(res['fun'], 8495))
 
 if __name__ == '__main__':
     unittest.main()
