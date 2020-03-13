@@ -186,7 +186,7 @@ def intlinprog(
         res['execution_time'] = time() - start_time
         res['fun'] = best_node.z
         res['nit'] = nit
-        res['x'] = best_node.x.round().astype(int)
+        res['x'] = best_node.x
         return res
 
     # Run the thing
