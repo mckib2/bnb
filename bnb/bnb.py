@@ -1,259 +1,243 @@
-'''Use branch and bound to solve integer program.'''
+'''Branch and bound integer programming solver.
+
+References
+----------
+.. [1] Bradley, Stephen P., Arnoldo C. Hax, and Thomas L. Magnanti.
+       "Applied mathematical programming." (1977).
+.. [2] Taylor, Bernard W., et al. Introduction to management science.
+       Prentice Hall, 2002.
+'''
 
 import logging
 from queue import LifoQueue
+from time import time
 
 import numpy as np
-import networkx as nx
 from scipy.optimize import linprog
 
 class Node:
-    _id_counter = 0
-    @classmethod
-    def get_id(cls):
-        ret = cls._id_counter
-        cls._id_counter += 1
-        return ret
+    '''Encapsulate an LP in the search.'''
+    def __init__(self, c, A, b, bounds):
+        self.id = self.take_num()
+        self.c = c.copy()
+        self.A = A.copy()
+        self.b = b.copy()
+        self.bounds = bounds.copy()
 
-    def __init__(self, c, A_ub=None, b_ub=None, bounds=None, integer_lbnd=None):
-        self.c = np.array(c)*-1 # turn max problem into min for scipy.optimize.linprog
-        self.A_ub = A_ub
-        self.b_ub = b_ub
+        # Populated by self.solve():
+        self.feasible = None
+        self.z = None
+        self.x = None
 
-        # Make bounds -- default x_i > 0
-        self.bnds = bounds
-        if bounds is None:
-            self.bnds = [(0, None)]*self.c.size
+    def solve(self):
+        '''Solve the LP relaxation.'''
+        res = linprog(
+            -1*self.c, self.A, self.b, bounds=self.bounds,
+            method='revised simplex')
 
-        # The maximum integer solution lower bound and holder for cost
-        self.integer_lbnd = integer_lbnd
-        self.cost = None
-
-        # Create A_ub if I don't have it
-        if self.A_ub is None:
-            self.A_ub = np.zeros((0, self.c.size))
-            self.b_ub = np.zeros(0)
-
-        # Make sure we got arrays
-        self.A_ub = np.array(self.A_ub)
-        self.b_ub = np.array(self.b_ub)
-
-        # Get a unique id
-        self.id = self.get_id()
-
-    def label(self):
-        '''Return label for plotting.'''
-        if self.cost is None:
-            return str(self.id) + '\n' + str(self.cost)
-        return str(self.id) + '\n' + '%g' % self.cost
-
-    def add_A_ub(self, idx, val):
-        '''Add an upper bound constraint.'''
-
-        # Add on a new row
-        self.A_ub = np.concatenate((self.A_ub, np.zeros((1, self.A_ub.shape[1]))), axis=0)
-        self.A_ub[-1, idx] = 1
-        self.b_ub = np.concatenate((self.b_ub, [val]))
-
-    def change_bound(self, idx, lower, upper):
-        '''Constrain a single variable to be between lower and upper.'''
-        self.bnds[idx] = (lower, upper)
+        if not res['success']:
+            self.feasible = False
+        else:
+            self.feasible = True
+            self.z = -1*res['fun']
+            self.x = res['x']
 
     def change_upper_bound(self, idx, upper):
         '''Constrain a single variable to be below a value.'''
-        prev = self.bnds[idx]
-        self.bnds[idx] = (prev[0], upper)
+        prev = self.bounds[idx]
+        self.bounds[idx] = (prev[0], upper)
 
     def change_lower_bound(self, idx, lower):
         '''Constrain a single variable to be above a value.'''
-        prev = self.bnds[idx]
-        self.bnds[idx] = (lower, prev[1])
+        prev = self.bounds[idx]
+        self.bounds[idx] = (lower, prev[1])
 
-    def solve(self):
-        '''Solve the LP relaxation of this node's problem instance.'''
+    def __repr__(self):
+        return(
+            'node with id: {id}\n'
+            '\tfeasible: {feasible}\n'
+            '\t  bounds: {bounds}\n'
+            '\t       z: {z}\n'
+            '\t       x: {x}').format(
+                id=self.id, feasible=self.feasible,
+                bounds=self.bounds, z=self.z, x=str(self.x))
 
-        # Use revised simplex, more accurate than interior-point
-        # Won't work currently with interior point
-        res = linprog(self.c, A_ub=self.A_ub, b_ub=self.b_ub, bounds=self.bnds, method='revised simplex')
+    # Class attributes
+    _node_ctr = 0
+    @classmethod
+    def take_num(cls):
+        '''Return a number that should be unique to the node instance.
+        '''
+        cls._node_ctr += 1
+        return cls._node_ctr
 
-        # if we can't solve it, quit
-        if not res['success']:
-            return(None, (self.integer_lbnd, -np.inf))
-
-        # Get the upper and lower bound
-        ubnd = res['fun']*-1
-        lbnd = -1*self.c @ np.floor(res['x'])
-
-        # Save known integer lower bound if needed
-        if self.integer_lbnd is None:
-            self.integer_lbnd = lbnd
-
-        # Save the cost for the label
-        self.cost = ubnd
-
-        # Return solution consisting of coefficients and bounds
-        return(res['x'], (self.integer_lbnd, ubnd))
-
-    def spawn(self):
-        '''Return a copy of myself.'''
-        return Node(-1*self.c.copy(), self.A_ub.copy(), self.b_ub.copy(), self.bnds.copy(), self.integer_lbnd)
-
-def bnb(c, A_ub, b_ub, bounds=None, ret_tree=False):
-    '''BNB using LP relaxations to solve integer programs.
-
-    Parameters
-    ----------
-    c : 1D array
-        Objective coefficients (for max problem).
-    A_ub : 2D array or None, optional
-        Upper bound constraints (<=).
-    b_ub : 1D array or None, optional
-        Upper bound inequality constraint vector.
-    bounds : list of tuple or None, optional
-        Bounds for each variable.
-    ret_tree : bool, optional
-        Return the networkx.DiGraph object.
-
-    Returns
-    -------
-    x : 1D array or None
-        Optimal integer solution or None if the problem is infeasible.
-    G : networkx.DiGraph
-        Tree of solution nodes.
+class BNB:
+    '''Relaxed LP branch and bound method for solving general ILPs.
 
     Notes
     -----
-    Follows the algorithm described in [1].  Assumes that objective should be maximized.
-
-    References
-    ----------
-    .. [1] http://web.tecnico.ulisboa.pt/mcasquilho/compute/_linpro/TaylorB_module_c.pdf
+    Implements the algorithm described in [1]_ Figure 9.17.
     '''
 
-    # Initial node
-    n0 = Node(c, A_ub=A_ub, b_ub=b_ub, bounds=bounds)
-    x0, (lbnd0, ubnd0) = n0.solve()
+    def __init__(self, c, A, b, bounds):
 
-    # Check exit conditions
-    if x0 is not None and np.all(np.isclose(x0, x0.round())):
-        logging.info('Parent has integer solution!')
+        # Initialization
+        # Solve the associated LP
+        self.cur_node = Node(c, A, b, bounds)
+        self.cur_node.solve()
+
+        # Let zbar be its optimal value
+        self.zbar = self.cur_node.z
+
+        # Let uz = value of best known feasible solution (-inf if none known)
+        self.uz = -1*np.inf
+
+        # Grab a Queue to stash leafs on
+        self.Q = LifoQueue()
+
+        # Keep track of the best incumbent node
+        self.best_node = None
+
+        # track how long it takes to run
+        self.start_time = None
+
+        logging.info('Initialized beginning node:')
+        logging.info(str(self.cur_node))
+
+    def run(self):
+        '''Start the control flow.'''
+        self.start_time = time()
+        return self.LP_infeasibility_test()
+
+    def LP_infeasibility_test(self):
+        '''Linear program infeasible over subdivision?'''
+
+        # YES
+        if not self.cur_node.feasible:
+            logging.info('Node is infeasible!')
+            return self.exhausted_test()
+        # NO
+
+        # Let z be its optimal value; is z <= uz?
+        # YES
+        if self.cur_node.z <= self.uz:
+            # Fathomed by bound
+            logging.info('Node fathomed by bound!')
+            return self.exhausted_test()
+        # NO
+        return self.integer_sol_test()
+
+    def exhausted_test(self):
+        '''Every subdivision analyzed completely?'''
+
+        # YES
+        if self.Q.empty():
+            # Termination
+            logging.info('No nodes on the Queue, terminating!')
+            return self.terminate()
+        # NO
+        # Select subdivision not yet analyzed completely
+        self.cur_node = self.Q.get()
+
+        # Solve linear program over subdivision
+        self.cur_node.solve()
+        logging.info('Solved node:')
+        logging.info(str(self.cur_node))
+        return self.LP_infeasibility_test()
+
+    def terminate(self):
+        '''Termination'''
+        # z = uz is optimal => node corresponding to uz is solution node
         return {
-            'x': x0,
-            'fun': ubnd0,
+            'x': self.best_node.x,
+            'fun': self.best_node.z,
+            'execution_time': time() - self.start_time,
         }
-    elif x0 is None:
-        warning.info('Problem is not feasible!')
-        return(None, G)
 
-    # Keep track of backup nodes in case all children are duds
-    Q = LifoQueue()
-    Q.put(n0)
+    def integer_sol_test(self):
+        '''Solution to LP has all variables integer?'''
 
-    # Result object
-    res = dict()
+        # YES
+        if np.allclose(self.cur_node.x, np.round(self.cur_node.x)):
+            logging.info('Found integer solution!')
+            # Change uz to z
+            self.uz = self.cur_node.z
+            logging.info('Updated bounds: %g <= z* <= %g', self.uz, self.zbar)
 
-    if ret_tree:
-        # Make a tree and include in return object
-        G = nx.DiGraph()
-        G.add_node(n0)
-        res['tree'] = G
+            # If we did enough to change the bound, then we're the
+            # best so far
+            self.best_node = self.cur_node
 
-    # Keep track of the greatest upper bound of any ending node
-    GUB = dict()
+            # YES
+            if np.allclose(self.uz, self.zbar):
+            # if True:
+                logging.info('Solution is optimal! Terminating.')
+                return self.terminate()
+            # NO -- fathomed by integrality
+            logging.info('Fathomed by integrality!')
+            return self.exhausted_test()
+        # NO
 
-    while True:
-        # Solve parent node
-        logging.info('Parent has bounds: (%g, %g)', lbnd0, ubnd0)
 
-        # branch on non-integer variable with largest fractional part
-        # there are better ways of doing this, but do this for simplicity for now
-        idx = np.argmax(x0 - np.floor(x0)).squeeze()
-        n1 = n0.spawn()
-        n2 = n0.spawn()
+        # Generate new subdivisions from a fractional variable in the
+        # LP solution
+        n1 = Node(self.cur_node.c, self.cur_node.A, self.cur_node.b, self.cur_node.bounds)
+        n2 = Node(self.cur_node.c, self.cur_node.A, self.cur_node.b, self.cur_node.bounds)
 
-        # Add new bounds
-        n1.change_upper_bound(idx, np.floor(x0[idx]))
-        n2.change_lower_bound(idx, np.ceil(x0[idx]))
+        # Rule for branching: choose variable with largest residual
+        # as in [2]_.
+        idx = np.argmax(self.cur_node.x - np.floor(self.cur_node.x))
+        n1.change_upper_bound(idx, np.floor(self.cur_node.x[idx]))
+        n2.change_lower_bound(idx, np.ceil(self.cur_node.x[idx]))
+        logging.info('Generating new node with bounds: %s', str(n1.bounds))
+        logging.info('Generating new node with bounds: %s', str(n2.bounds))
 
-        # Solve children
-        x1, (lbnd1, ubnd1) = n1.solve()
-        x2, (lbnd2, ubnd2) = n2.solve()
-        logging.info('First node has upper bound: %g', ubnd1)
-        logging.info('Second node has upper bound: %g', ubnd2)
+        # Put new division on the Queue
+        logging.info('New nodes stashed in the Queue.')
+        self.Q.put(n1)
+        self.Q.put(n2)
 
-        # If n0 has children, then it is no longer an ending node
-        GUB.pop(n0, None)
+        return self.exhausted_test()
 
-        # Add to tree
-        if ret_tree:
-            G.add_edge(n0, n1)
-            G.add_edge(n0, n2)
 
-        # Are any of these integer?
-        cond1 = x1 is not None and np.all(np.isclose(x1, np.round(x1)))
-        cond2 = x2 is not None and np.all(np.isclose(x2, np.round(x2)))
-        if cond1:
-            logging.info('Found integer solution x1! Need to see if optimal...')
+def intprog(c, A, b, bounds=None, method='bnb'):
+    '''Integer program solver.
+    '''
 
-            if all([ubnd1 >= ub for ub in GUB.values()]) and ubnd1 >= ubnd2:
-                logging.info('x1 is the optimal integer solution!')
-                res['x'] = x1
-                res['fun'] = ubnd1
-                return res
-            else:
-                logging.info('x1 is not optimal, but is now in GUB')
-                GUB[n1] = ubnd1
+    # Input matrices are assumed from here on out to be numpy arrays
+    c = np.array(c)
+    A = np.array(A)
+    b = np.array(b)
 
-        if cond2:
-            logging.info('Found integer solution x2! Need to see if optimal...')
+    if c.ndim > 1:
+        logging.warning('Flattening coefficient vector!')
+        c = np.flatten(c)
+    if A.ndim != 2:
+        raise ValueError('Inequality constraint matrix should be 2D array!')
+    if b.ndim > 1:
+        logging.warning('Flattening inequality constraint vector!')
+        b = np.flatten(b)
 
-            if all([ubnd2 >= ub for ub in GUB.values()]) and ubnd2 >= ubnd1:
-                logging.info('x2 is the optimal integer solution!')
-                res['x'] = x2
-                res['fun'] = ubnd2
-                return res
-            else:
-                logging.info('x2 is not optimal, but is now in GUB')
-                GUB[n2] = ubnd2
+    if bounds is None:
+        bounds = [(0, None)]*c.size
 
-        # Find suitable parent if both children are infeasible
-        if (x1 is None and x2 is None) or (cond1 and x2 is None) or (cond2 and x1 is None):
-            logging.info('Both children are duds! Pulling off stack!')
-            n0 = Q.get()
-            x0, (lbnd0, ubnd0) = n0.solve()
-            GUB.pop(n0, None)
-            continue
+    # Call the appropriate method
+    if method == 'bnb':
+        bnb = BNB(c, A, b, bounds)
+        return bnb.run()
+    else:
+        raise ValueError('"%s" not a valid method!' % method)
 
-        # If not, select the node with the highest max upper bound and set as new parent
-        del n0, x0, lbnd0, ubnd0
-        if ubnd1 > ubnd2:
-            logging.info('Choosing first node as new parent.')
-            n0, x0, lbnd0, ubnd0 = n1, x1, lbnd1, ubnd1
-
-            # Save n2 for later if it's feasible
-            if x2 is not None and ubnd2 > lbnd2:
-                logging.info('Stashing n2 in queue')
-                GUB[n2] = ubnd2
-                Q.put(n2)
-        else:
-            logging.info('Choosing second node as new parent.')
-            n0, x0, lbnd0, ubnd0 = n2, x2, lbnd2, ubnd2
-
-            # Save n1 for later if it's feasible
-            if x1 is not None and ubnd1 > lbnd1:
-                logging.info('Stashing n1 in queue')
-                GUB[n1] = ubnd1
-                Q.put(n1)
 
 if __name__ == '__main__':
 
     logging.basicConfig(level=logging.INFO)
 
-    c = [8, 11, 6, 4]
+    c = [5, 8]
     A = [
-        [5, 7, 4, 3],
+        [1, 1],
+        [5, 9],
     ]
-    b = [14]
-    bnds = [(0, 1)]*4
-    res = bnb(c, A_ub=A, b_ub=b, bounds=bnds)
+    b = [6, 45]
+    res = intprog(c, A, b)
     print(res)
