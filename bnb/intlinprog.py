@@ -23,23 +23,23 @@ class _Node:
         self.feasible = None
         self.z = None
         self.x = None
-        self.res = None # reference to the LP solution
+        self.lp_res = None # reference to the LP solution
 
     def solve(self):
         '''Solve the LP relaxation.'''
-        res = linprog(
+        lp_res = linprog(
             -1*self.ilp.c,
             self.ilp.A_ub, self.ilp.b_ub,
             self.ilp.A_eq, self.ilp.b_eq,
             bounds=self.ilp.bounds, method='revised simplex')
 
-        if not res['success']:
+        if not lp_res['success']:
             self.feasible = False
         else:
             self.feasible = True
-            self.z = -1*res['fun']
-            self.x = res['x']
-            self.res = res
+            self.z = -1*lp_res['fun']
+            self.x = lp_res['x']
+            self.lp_res = lp_res
 
     def change_upper_bound(self, idx, upper):
         '''Constrain a single variable to be below a value.'''
@@ -52,6 +52,7 @@ class _Node:
         self.ilp.bounds[idx] = (lower, prev[1])
 
     def __lt__(self, other):
+        '''Node comparison for best-first search strategy.'''
         return self.parent_cost < other.parent_cost
 
     def __repr__(self):
@@ -181,7 +182,7 @@ def intlinprog(
             logging.warning('No solution found, returning empty node.')
 
         # Use LP OptimizationResult as a starter
-        res = best_node.res
+        res = best_node.lp_res
         res['execution_time'] = time() - start_time
         res['fun'] = best_node.z
         res['nit'] = nit
