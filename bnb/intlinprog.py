@@ -1,7 +1,7 @@
 '''Interface for mixed integer linear programs.'''
 
 import logging
-from queue import LifoQueue
+from queue import LifoQueue, Queue, PriorityQueue
 from time import time
 from collections import namedtuple
 from copy import deepcopy
@@ -14,9 +14,10 @@ _ILPProblem = namedtuple(
 
 class Node:
     '''Encapsulate an LP in the search.'''
-    def __init__(self, ilp):
+    def __init__(self, ilp, parent_cost=-1*np.inf):
         self.id = self.take_num()
         self.ilp = deepcopy(ilp)
+        self.parent_cost = parent_cost # used for best-first search
 
         # Populated by self.solve():
         self.feasible = None
@@ -49,6 +50,9 @@ class Node:
         '''Constrain a single variable to be above a value.'''
         prev = self.ilp.bounds[idx]
         self.ilp.bounds[idx] = (lower, prev[1])
+
+    def __lt__(self, other):
+        return self.parent_cost < other.parent_cost
 
     def __repr__(self):
         return(
@@ -140,17 +144,26 @@ def  _process_intlinprog_args(
 
 def intlinprog(
         c, A_ub=None, b_ub=None, A_eq=None, b_eq=None, binary=False,
-        real_valued=None, bounds=None):
+        real_valued=None, bounds=None, search_strategy='depth-first'):
     '''Use branch and bound to solve mixed linear programs.'''
 
     ilp = _process_intlinprog_args(
         c, A_ub, b_ub, A_eq, b_eq, binary, real_valued, bounds)
 
+    # Choose queue type based on search strategy, see
+    # https://en.wikipedia.org/wiki/Branch_and_bound#Generic_version
+    search_strat = search_strategy.lower()
+    try:
+        Q = {
+            'depth-first': LifoQueue,
+            'breadth-first': Queue,
+            'best-first': PriorityQueue,
+        }[search_strat]()
+    except KeyError:
+        raise ValueError('"%s" is not a valid search strategy!' % search_strategy)
+
     # Get integer valued variables mask
     integer_valued = ~ilp.real_valued
-
-    # Initialize Queue
-    Q = LifoQueue()
 
     # We are looking for the best node
     best_node = Node(ilp)
@@ -168,6 +181,7 @@ def intlinprog(
     logging.info('Initialized beginning node:')
     logging.info(str(cur_node))
 
+    nit = 0
     start_time = time()
 
     # tag: terminate
@@ -176,13 +190,14 @@ def intlinprog(
         # z = uz is optimal => node corresponding to uz is solution node
         if best_node.x is None:
             logging.warning('No solution found, returning empty node.')
-        # TODO: use LP OptimizationResult as a starter
-        return {
-            'x': best_node.x,
-            'fun': best_node.z,
-            'execution_time': time() - start_time,
-            'LP': best_node.res,
-        }
+
+        # Use LP OptimizationResult as a starter
+        res = best_node.res
+        res['execution_time'] = time() - start_time
+        res['fun'] = best_node.z
+        res['nit'] = nit
+        res['x'] = best_node.x.astype(int)
+        return res
 
     # Run the thing
     while True:
@@ -230,8 +245,8 @@ def intlinprog(
 
                     # Generate new subdivisions from a fractional variable in the
                     # LP solution
-                    n1 = Node(cur_node.ilp)
-                    n2 = Node(cur_node.ilp)
+                    n1 = Node(cur_node.ilp, cur_node.z)
+                    n2 = Node(cur_node.ilp, cur_node.z)
 
                     # Rule for branching: choose variable with largest residual
                     # as in [2]_.
@@ -266,6 +281,11 @@ def intlinprog(
         logging.info(str(cur_node))
         # GOTO: LP_infeasibility_test
 
+        nit += 1
+
+    # We should never reach here
+    raise ValueError('Something has gone terribly wrong...')
+
 if __name__ == '__main__':
     # logging.basicConfig(level=logging.INFO)
     c = [100, 150]
@@ -274,5 +294,5 @@ if __name__ == '__main__':
         [15, 30],
     ]
     b = [40000, 200]
-    res = intlinprog(c, A, b)
+    res = intlinprog(c, A, b, search_strategy='depth-first')
     print(res)
