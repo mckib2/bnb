@@ -11,7 +11,7 @@ References
 
 import unittest
 
-from intprog import bnb
+from bnb import intprog
 
 class TestProblems(unittest.TestCase):
 
@@ -23,7 +23,7 @@ class TestProblems(unittest.TestCase):
             [15, 30],
         ]
         b = [40000, 200]
-        res = bnb(c, A_ub=A, b_ub=b)
+        res = intprog(c, A, b)
         self.assertEqual(res['x'].tolist(), [1, 6])
         self.assertEqual(res['fun'], 1000)
 
@@ -36,7 +36,7 @@ class TestProblems(unittest.TestCase):
             [1, 1, 0, 0],
         ]
         b = [120000, 12, 1]
-        res = bnb(c, A_ub=A, b_ub=b)
+        res = intprog(c, A, b)
         self.assertEqual(res['x'].tolist(), [1, 0, 1, 0])
         self.assertEqual(res['fun'], 700)
 
@@ -49,7 +49,7 @@ class TestProblems(unittest.TestCase):
             [2, 3],
         ]
         b = [1, 12, 12]
-        res = bnb(c, A_ub=A, b_ub=b)
+        res = intprog(c, A, b)
         self.assertTrue(res['x'].tolist() == [1, 2] or res['x'].tolist() == [2, 2])
         self.assertEqual(res['fun'], 2)
 
@@ -61,7 +61,7 @@ class TestProblems(unittest.TestCase):
             [5, 9],
         ]
         b = [6, 45]
-        res = bnb(c, A_ub=A, b_ub=b)
+        res = intprog(c, A, b)
         self.assertEqual(res['x'].tolist(), [0, 5])
         self.assertEqual(res['fun'], 40)
 
@@ -75,11 +75,10 @@ class TestProblems(unittest.TestCase):
         ]
         b = [3.1, 2.5, .4]
         bnds = [(0, 1)]*4
-        res = bnb(c, A_ub=A, b_ub=b, bounds=bnds)
+        res = intprog(c, A, b, bounds=bnds)
         self.assertEqual(res['x'].tolist(), [0, 0, 1, 1])
         self.assertEqual(res['fun'], .6)
 
-    @unittest.skip('not working')
     def test_prob6(self):
         '''Example problem from page 4 of [5]_.'''
         c = [8, 11, 6, 4]
@@ -88,8 +87,9 @@ class TestProblems(unittest.TestCase):
         ]
         b = [14]
         bnds = [(0, 1)]*4
-        res = bnb(c, A_ub=A, b_ub=b, bounds=bnds)
-        print(res)
+        res = intprog(c, A, b, bounds=bnds)
+        self.assertEqual(res['x'].tolist(), [0, 1, 1, 1])
+        self.assertEqual(res['fun'], 21)
 
 if __name__ == '__main__':
     unittest.main()
