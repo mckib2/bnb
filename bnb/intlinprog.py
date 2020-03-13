@@ -12,7 +12,7 @@ from scipy.optimize import linprog
 _ILPProblem = namedtuple(
     '_ILPProblem', 'c A_ub b_ub A_eq b_eq binary real_valued bounds')
 
-class Node:
+class _Node:
     '''Encapsulate an LP in the search.'''
     def __init__(self, ilp, parent_cost=-1*np.inf):
         self.id = self.take_num()
@@ -81,33 +81,21 @@ def  _process_intlinprog_args(
     c = np.array(c).flatten()
 
     # Deal with constraints:
-    if A_ub is None:
-        # A_ub = np.zeros((0, c.size))
-        pass
-    else:
+    if A_ub is not None:
         A_ub = np.array(A_ub)
         assert A_ub.ndim == 2, 'Inequality constraint matrix must be 2D!'
         assert A_ub.shape[1] == c.size, ( # pylint: disable=E1136
             'Inequality constraint matrix must match size of c!')
-    if b_ub is None:
-        # b_ub = np.zeros(0)
-        pass
-    else:
+    if b_ub is not None:
         b_ub = np.array(b_ub).flatten()
         assert b_ub.size == A_ub.shape[0], (
             'Inequality constraint vector must have match size of matrix!')
-    if A_eq is None:
-        # A_eq = np.zeros((0, c.size))
-        pass
-    else:
+    if A_eq is not None:
         A_eq = np.array(A_eq)
         assert A_eq.ndim == 2, 'Inequality constraint matrix must be 2D!'
         assert A_eq.shape[1] == c.size, ( # pylint: disable=E1136
             'Inequality constraint matrix must match size of c!')
-    if b_eq is None:
-        # b_eq = np.zeros(0)
-        pass
-    else:
+    if b_eq is not None:
         b_eq = np.array(b_eq).flatten()
         assert b_eq.size == A_eq.shape[0], (
             'Inequality constraint vector must have match size of matrix!')
@@ -132,7 +120,8 @@ def  _process_intlinprog_args(
         real_valued = np.array(real_valued, dtype=bool).flatten()
         if real_valued.size != c.size:
             raise ValueError(
-                'Expected real_valued mask of size %d but got %d' % (c.size, real_valued.size))
+                'Expected real_valued mask of size %d but got %d' % (
+                    c.size, real_valued.size))
         if np.sum(real_valued) == c.size:
             logging.warning('All variables are real-valued, this is a linear program!')
     else:
@@ -166,10 +155,10 @@ def intlinprog(
     integer_valued = ~ilp.real_valued
 
     # We are looking for the best node
-    best_node = Node(ilp)
+    best_node = _Node(ilp)
 
     # Solve the associated LP
-    cur_node = Node(ilp)
+    cur_node = _Node(ilp)
     cur_node.solve()
 
     # Let zbar be its optimal value
@@ -196,7 +185,7 @@ def intlinprog(
         res['execution_time'] = time() - start_time
         res['fun'] = best_node.z
         res['nit'] = nit
-        res['x'] = best_node.x.astype(int)
+        res['x'] = best_node.x.round().astype(int)
         return res
 
     # Run the thing
@@ -245,8 +234,8 @@ def intlinprog(
 
                     # Generate new subdivisions from a fractional variable in the
                     # LP solution
-                    n1 = Node(cur_node.ilp, cur_node.z)
-                    n2 = Node(cur_node.ilp, cur_node.z)
+                    n1 = _Node(cur_node.ilp, cur_node.z)
+                    n2 = _Node(cur_node.ilp, cur_node.z)
 
                     # Rule for branching: choose variable with largest residual
                     # as in [2]_.
