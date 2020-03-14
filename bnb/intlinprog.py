@@ -176,54 +176,69 @@ def  _process_intlinprog_args(
     return (_ILPProblem(
         c, A_ub, b_ub, A_eq, b_eq, binary, real_valued, bounds), x0)
 
-def _add_info_from_lp_result(res, lp_res):
-    '''Scrape information about associated linear program solution.'''
+def _make_result(node, nit, maxiter, start_time):
+    '''Make an OptimizeResult object from a search tree _Node.'''
 
-    # shift LP statuses past 1 up one to convert to ILP status; we
-    # inserted an additional status at position 1 for maxiter timeout
-    # with/without feasible solution
-    if lp_res['status'] > 1:
-        lp_res['status'] += 1
+    res = OptimizeResult()
 
-    # Change message contents slightly for status 0 message to
-    # indicate that the optimal solution was found.
-    if 'message' not in res:
-        if lp_res['status'] == 0:
-            res['message'] = (
-                lp_res['message'][:-1] + ' (with optimal solution).')
+    # messages unique to ILP OptimizeResult: status -> message
+    messages = {
+        0 : 'Optimization terminated successfully (with optimal solution).',
+        1 : [
+            'Iteration limit reached with feasible solution (maybe suboptimal).',
+            'Iteration limit reached without feasible solution.',
+        ],
+    }
+    # Copy messages from LP OptimizeResult
+    if node.lp_res is not None:
+        for ii in range(2, 5):
+            messages[ii] = node.lp_res['message']
+
+    # Did we exceed allowed number of iterations?
+    if nit >= maxiter:
+        res['status'] = 1
+        # collapse message list into a single item:
+        if node.x is None:
+            messages[1] = messages[1][1]
         else:
-            res['message'] = lp_res['message']
+            messages[1] = messages[1][0]
 
-    for k in ['con', 'slack', 'success', 'message']:
-        # Only update if the key wasn't already set by ILP solver
-        if k not in res:
-            res[k] = lp_res[k]
+    # If we found a feasible node, then we won (even if it's not
+    # provably optimal)
+    res['con'] = np.zeros(0)
+    res['slack'] = np.zeros(0)
+    if node.x is None:
+        # We only fail if we don't find a feasible solution,
+        # associated LP will know more about why we failed:
+        res['success'] = False
+        res['status'] = node.ilp.lp_res['status']
+    else:
+        # Info about associated LP solution
+        if node.ilp.A_eq is not None:
+            res['con'] = node.ilp.b_eq - node.ilp.A_eq @ node.x
+        if node.ilp.A_ub is not None:
+            res['slack'] = node.ilp.b_ub - node.ilp.A_ub @ node.x
 
+        # If we have a feasible solution then we declare success
+        res['success'] = True
+        if 'status' not in res:
+            res['status'] = 0
+
+    res['execution_time'] = time() - start_time
+    res['fun'] = node.z
+    res['nit'] = nit
+    res['x'] = node.x
+
+    # Make integer values true integers
+    if node.x is not None:
+        res['x'][~node.ilp.real_valued] = np.round(
+            res['x'][~node.ilp.real_valued])
+
+    # Look up message and return result
+    res['message'] = messages[res['status']]
     return res
 
-def _add_x0_result_info(best_node, x0, uz, A_ub, b_ub, A_eq, b_eq):
-    '''Add OptimizeResult info from initial feasible solution.'''
-    best_node.z = uz
-    best_node.x = x0
-    best_node.lp_res = OptimizeResult()
-
-    # Emulate a successful LP OptimizeResult
-    best_node.lp_res['status'] = 0
-    best_node.lp_res['message'] = (
-        'Optimization terminated successfully.')
-    if A_eq is not None:
-        best_node.lp_res['con'] = b_eq - A_eq @ x0
-    else:
-        best_node.lp_res['con'] = np.zeros(0)
-    if A_ub is not None:
-        best_node.lp_res['slack'] = b_ub - A_ub @ x0
-    else:
-        best_node.lp_res['slack'] = np.zeros(0)
-    best_node.lp_res['success'] = True
-
-    return best_node
-
-def _terminate(best_node, res, start_time, nit, integer_valued):
+def _terminate(best_node, start_time, nit, maxiter):
     '''Termination: return the best node as the solution.'''
     # z = uz is optimal => node corresponding to uz is
     # the solution node
@@ -231,23 +246,7 @@ def _terminate(best_node, res, start_time, nit, integer_valued):
         msg = 'No solution found, returning empty node.'
         warn(msg, OptimizeWarning)
 
-        # Variables we don't have because associated LP failed
-        res['con'] = None
-        res['slack'] = None
-    else:
-        # Grab info about solution node from LP OptimizationResult
-        res = _add_info_from_lp_result(res, best_node.lp_res)
-
-    res['execution_time'] = time() - start_time
-    res['fun'] = best_node.z
-    res['nit'] = nit
-    res['x'] = best_node.x
-
-    # Make integer values true integers
-    if best_node.x is not None:
-        res['x'][integer_valued] = np.round(res['x'][integer_valued])
-
-    return res
+    return _make_result(best_node, nit, maxiter, start_time)
 
 def intlinprog(
         c, A_ub=None, b_ub=None, A_eq=None, b_eq=None, binary=False,
@@ -351,17 +350,13 @@ def intlinprog(
                 ``0`` : Optimization terminated successfully (with
                         optimal solution).
 
-                ``1`` : Iteration limit reached with feasible
-                        solution (maybe suboptimal).
+                ``1`` : Iteration limit reached.
 
-                ``2`` : Iteration limit reached without feasible
-                        solution.
+                ``2`` : Problem appears to be infeasible.
 
-                ``3`` : Problem appears to be infeasible.
+                ``3`` : Problem appears to be unbounded.
 
-                ``4`` : Problem appears to be unbounded.
-
-                ``5`` : Numerical difficulties encountered.
+                ``4`` : Numerical difficulties encountered.
 
             nit : int
                 The total number of iterations performed in all
@@ -434,12 +429,12 @@ def intlinprog(
     # initial feasible node if given
     best_node = _Node(ilp)
     if x0 is not None:
-        uz = c @ x0
-
         # Populate fields in best_node and OptimizeResult based on
         # known initial solution x0
-        best_node = _add_x0_result_info(
-            best_node, x0, uz, A_ub, b_ub, A_eq, b_eq)
+        uz = c @ x0
+        best_node.feasible = True
+        best_node.z = uz
+        best_node.x = x0
     else:
         uz = -1*np.inf
 
@@ -450,23 +445,15 @@ def intlinprog(
     # Let zbar be its optimal value
     zbar = cur_node.z
 
-    # logging.info('Initialized beginning node:')
-    # logging.info(str(cur_node))
-
-    nit = 0
+    # Run the solver until the optimal solution is found or maxiter
+    # is hit
     maxit = solver_options.get('maxiter', np.inf)
-    res = OptimizeResult()
-    messages = {
-        1: ('Iteration limit reached with feasible solution '
-            '(maybe suboptimal).'),
-        2: 'Iteration limit reached without feasible solution.',
-    }
+    nit = 0
     start_time = time()
 
     # tag: terminate
     terminate = partial(
-        _terminate, start_time=start_time,
-        integer_valued=integer_valued)
+        _terminate, start_time=start_time, maxiter=maxit)
 
     # Start branchin' and boundin'
     while True:
@@ -511,7 +498,7 @@ def intlinprog(
                         # logging.info(
                         #     'Solution is optimal! Terminating.')
                         return terminate(
-                            res=res, best_node=best_node, nit=nit)
+                            best_node=best_node, nit=nit)
                     # NO -- fathomed by integrality
                     # logging.info('Fathomed by integrality!')
                     # GOTO: exhausted_test
@@ -552,7 +539,7 @@ def intlinprog(
         if Q.empty():
             # Termination
             # logging.info('No nodes on the Queue, terminating!')
-            return terminate(res=res, best_node=best_node, nit=nit)
+            return terminate(best_node=best_node, nit=nit)
         # NO
         # Select subdivision not yet analyzed completely
         cur_node = Q.get()
@@ -560,16 +547,8 @@ def intlinprog(
         # Call it an iteration before we solve the next LP
         nit += 1
         if nit >= maxit:
-            if best_node.x is not None:
-                res['status'] = 1 # we have a feasible node
-            else:
-                res['status'] = 2 # no feasible node found
-            res['message'] = messages[res['status']]
-
-            # Declare success if we found a feasible solution, might
-            # not be optimal though:
-            res['success'] = best_node.x is not None
-            return terminate(res=res, best_node=best_node, nit=nit)
+            # Quit if we timeout on number of iterations
+            return terminate(best_node=best_node, nit=nit)
 
         # Solve linear program over subdivision
         cur_node.solve()
