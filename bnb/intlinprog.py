@@ -85,7 +85,7 @@ class _Node:
         return cls._node_ctr
 
 def  _process_intlinprog_args(
-        c, A_ub, b_ub, A_eq, b_eq, binary, real_valued, bounds):
+        c, A_ub, b_ub, A_eq, b_eq, binary, real_valued, bounds, x0):
     '''Sanitize input to intlinprog.'''
 
     # Deal with coefficients:
@@ -145,9 +145,36 @@ def  _process_intlinprog_args(
         # default: all variables are integer valued
         real_valued = np.zeros(c.size, dtype=bool)
 
+    # Initial values are solution variables or None
+    if x0 is not None:
+        try:
+            x0 = np.array(x0).flatten()
+            assert x0.size == c.size, 'x0 must have same size as c!'
+
+            # Make sure it satisfies constraints
+            msg = 'x0 is not a feasible solution! Ignoring.'
+            if A_ub is not None:
+                assert np.all(A_ub @ x0 <= b_ub), msg
+            if A_eq is not None:
+                assert np.allclose(A_eq @ x0, b_eq), msg
+
+            # Make sure integral entries in x0 are approx. integral
+            assert np.allclose(
+                x0[~real_valued], np.round(x0[~real_valued])), msg
+
+            # Mae sure entries in x0 are within bounds
+            for x00, b in zip(x0, bounds):
+                if b[0] is not None:
+                    assert x00 >= b[0], msg
+                if b[1] is not None:
+                    assert x00 <= b[1], msg
+        except AssertionError as e:
+            warn(str(e), OptimizeWarning)
+
     # Return sanitized values as an _ILPProblem:
-    return _ILPProblem(
-        c, A_ub, b_ub, A_eq, b_eq, binary, real_valued, bounds)
+    # We only use x0 for the initial solution, so return it separately
+    return (_ILPProblem(
+        c, A_ub, b_ub, A_eq, b_eq, binary, real_valued, bounds), x0)
 
 def _add_info_from_lp_result(res, lp_res):
     '''Scrape information about associated linear program solution.'''
@@ -173,6 +200,25 @@ def _add_info_from_lp_result(res, lp_res):
             res[k] = lp_res[k]
 
     return res
+
+def _add_x0_result_info(best_node, x0, uz, A_eq, b_eq):
+    '''Add OptimizeResult info from initial feasible solution.'''
+    best_node.z = uz
+    best_node.x = x0
+    best_node.lp_res = OptimizeResult()
+
+    # Emulate a successful LP OptimizeResult
+    best_node.lp_res['status'] = 0
+    best_node.lp_res['message'] = (
+        'Optimization terminated successfully.')
+    if A_eq is not None:
+        best_node.lp_res['con'] = b_eq - A_eq @ x0
+    else:
+        best_node.lp_res['con'] = np.zeros(0)
+    best_node.lp_res['slack'] = None
+    best_node.lp_res['success'] = True
+
+    return best_node
 
 def _terminate(best_node, res, start_time, nit, integer_valued):
     '''Termination: return the best node as the solution.'''
@@ -203,7 +249,7 @@ def _terminate(best_node, res, start_time, nit, integer_valued):
 def intlinprog(
         c, A_ub=None, b_ub=None, A_eq=None, b_eq=None, binary=False,
         real_valued=None, bounds=None, search_strategy='depth-first',
-        options=None, lp_options=None):
+        options=None, lp_options=None, x0=None):
     '''Use branch and bound to solve mixed integer linear programs.
 
     Parameters
@@ -265,6 +311,11 @@ def intlinprog(
         :ref:`'revised simplex' <optimize.linprog-revised_simplex>`.
         For a list of valid options, see the corresponding
         :ref:`linprog <optimize.linprog>` documentation.
+    x0 : 1-D array, optional
+        Guess values of the decision variables, which will be used
+        for additional pruning of the search tree by the optimization
+        algorithm. This argument is only used if ``x0`` represents a
+        feasible solution.
 
     Returns
     -------
@@ -322,6 +373,15 @@ def intlinprog(
 
     Notes
     -----
+    When ``x0`` is provided and is feasible, it is set as the best
+    solution currently known.  This will assist in pruning branches
+    that will never beat ``x0``, but the search will still start
+    from the initial associated linear program as the state of the
+    search tree is not captured by ``x0`` alone.  This means that
+    stopping ``intlinprog`` and resuming from the last known best
+    solution will still require a search starting from the first node,
+    but which might proceed more quickly due to the possibility of
+    more aggressive pruning.
 
     References
     ----------
@@ -333,8 +393,9 @@ def intlinprog(
     '''
 
     try:
-        ilp = _process_intlinprog_args(
-            c, A_ub, b_ub, A_eq, b_eq, binary, real_valued, bounds)
+        ilp, x0 = _process_intlinprog_args(
+            c, A_ub, b_ub, A_eq, b_eq,
+            binary, real_valued, bounds, x0)
     except AssertionError as e:
         # _process_intlinprog_args uses assertions as a clean way to
         # describe requirements on variables, but the correct
@@ -365,8 +426,18 @@ def intlinprog(
     # Get integer valued variables mask
     integer_valued = ~ilp.real_valued
 
-    # We are looking for the best node
+    # Let uz = value of best known feasible solution (-inf if none
+    # known).  We are looking for the best node -- initialize as the
+    # initial feasible node if given
     best_node = _Node(ilp)
+    if x0 is not None:
+        uz = c @ x0
+
+        # Populate fields in best_node and OptimizeResult based on
+        # known initial solution x0
+        best_node = _add_x0_result_info(best_node, x0, uz, A_eq, b_eq)
+    else:
+        uz = -1*np.inf
 
     # Solve the associated LP
     cur_node = _Node(ilp)
@@ -374,10 +445,6 @@ def intlinprog(
 
     # Let zbar be its optimal value
     zbar = cur_node.z
-
-    # Let uz = value of best known feasible solution
-    # (-inf if none known)
-    uz = -1*np.inf
 
     # logging.info('Initialized beginning node:')
     # logging.info(str(cur_node))
@@ -517,5 +584,6 @@ if __name__ == '__main__':
         [15, 30],
     ]
     b = [40000, 200]
-    res = intlinprog(c, A, b, search_strategy='depth-first', options={'maxiter': 7})
+    x0 = [0, 6]
+    res = intlinprog(c, A, b, search_strategy='depth-first', options={'maxiter': 7}, x0=x0)
     print(res)
