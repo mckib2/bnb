@@ -311,7 +311,8 @@ def intlinprog(
 
             nit : int
                 The total number of iterations performed in all
-                phases, i.e. the number of nodes in the search tree.
+                phases, i.e. the number of nodes evaluated in the
+                search tree.
             execution_time : float
                 The number of seconds taken to find the optimal
                 solution with integral constraints.
