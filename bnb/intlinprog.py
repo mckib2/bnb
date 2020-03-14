@@ -201,7 +201,7 @@ def _add_info_from_lp_result(res, lp_res):
 
     return res
 
-def _add_x0_result_info(best_node, x0, uz, A_eq, b_eq):
+def _add_x0_result_info(best_node, x0, uz, A_ub, b_ub, A_eq, b_eq):
     '''Add OptimizeResult info from initial feasible solution.'''
     best_node.z = uz
     best_node.x = x0
@@ -215,7 +215,10 @@ def _add_x0_result_info(best_node, x0, uz, A_eq, b_eq):
         best_node.lp_res['con'] = b_eq - A_eq @ x0
     else:
         best_node.lp_res['con'] = np.zeros(0)
-    best_node.lp_res['slack'] = None
+    if A_ub is not None:
+        best_node.lp_res['slack'] = b_ub - A_ub @ x0
+    else:
+        best_node.lp_res['slack'] = np.zeros(0)
     best_node.lp_res['success'] = True
 
     return best_node
@@ -435,7 +438,8 @@ def intlinprog(
 
         # Populate fields in best_node and OptimizeResult based on
         # known initial solution x0
-        best_node = _add_x0_result_info(best_node, x0, uz, A_eq, b_eq)
+        best_node = _add_x0_result_info(
+            best_node, x0, uz, A_ub, b_ub, A_eq, b_eq)
     else:
         uz = -1*np.inf
 
@@ -584,6 +588,6 @@ if __name__ == '__main__':
         [15, 30],
     ]
     b = [40000, 200]
-    x0 = [0, 6]
+    x0 = [1, 6]
     res = intlinprog(c, A, b, search_strategy='depth-first', options={'maxiter': 7}, x0=x0)
     print(res)
