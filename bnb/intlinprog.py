@@ -152,14 +152,13 @@ def  _process_intlinprog_args(
 def _add_info_from_lp_result(res, lp_res):
     '''Scrape information about associated linear program solution.'''
 
-    for k in ['con', 'slack', 'success', 'message', 'status']:
-        if k == 'status':
-            # shift statuses past 1 up one since we inserted an
-            # additional status at position 1 for maxiter timeout
-            # with/without feasible solution
-            if lp_res[k] > 1:
-                lp_res[k] += 1
+    # shift LP statuses past 1 up one to convert to ILP status; we
+    # inserted an additional status at position 1 for maxiter timeout
+    # with/without feasible solution
+    if lp_res['status'] > 1:
+        lp_res['status'] += 1
 
+    for k in ['con', 'slack', 'success', 'message', 'status']:
         # Only update if the key wasn't already set by ILP solver
         if k not in res:
             res[k] = lp_res[k]
