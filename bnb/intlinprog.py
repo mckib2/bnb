@@ -148,6 +148,23 @@ def  _process_intlinprog_args(
     return _ILPProblem(
         c, A_ub, b_ub, A_eq, b_eq, binary, real_valued, bounds)
 
+def _add_info_from_lp_result(res, lp_res):
+    '''Scrape information about associated linear program solution.'''
+
+    for k in ['con', 'slack', 'success', 'message', 'status']:
+        if k == 'status':
+            # shift statuses past 1 up one since we inserted an
+            # additional status at position 1 for maxiter timeout
+            # with/without feasible solution
+            if lp_res[k] > 1:
+                lp_res[k] += 1
+
+        # Only update if the key wasn't already set by ILP solver
+        if k not in res:
+            res[k] = lp_res[k]
+
+    return res
+
 def intlinprog(
         c, A_ub=None, b_ub=None, A_eq=None, b_eq=None, binary=False,
         real_valued=None, bounds=None, search_strategy='depth-first',
@@ -340,25 +357,19 @@ def intlinprog(
     # tag: terminate
     def _terminate():
         '''Termination: return the best node as the solution.'''
+        nonlocal res
         # z = uz is optimal => node corresponding to uz is
         # the solution node
         if best_node.x is None:
             msg = 'No solution found, returning empty node.'
             warn(msg, OptimizeWarning)
+
+            # Variables we don't have because associated LP failed
             res['con'] = None
             res['slack'] = None
         else:
             # Grab info about solution node from LP OptimizationResult
-            for k in ['con', 'slack']:
-                res[k] = best_node.lp_res[k]
-            for k in ['success', 'message', 'status']:
-                if k not in res:
-                    if k == 'status':
-                        # shift statuses past 1 up one since we
-                        # inserted a status at position 1
-                        if best_node.lp_res[k] > 1:
-                            best_node.lp_res[k] += 1
-                    res[k] = best_node.lp_res[k]
+            res = _add_info_from_lp_result(res, best_node.lp_res)
 
         res['execution_time'] = time() - start_time
         res['fun'] = best_node.z
@@ -485,5 +496,5 @@ if __name__ == '__main__':
         [15, 30],
     ]
     b = [40000, 200]
-    res = intlinprog(c, A, b, search_strategy='depth-first', options={'disp': True})
+    res = intlinprog(c, A, b, search_strategy='depth-first', options={'maxiter': 6})
     print(res)
