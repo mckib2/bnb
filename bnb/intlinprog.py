@@ -6,7 +6,6 @@ from time import time
 from collections import namedtuple
 from copy import deepcopy
 from warnings import warn
-from functools import partial
 
 import numpy as np
 from scipy.optimize import linprog, OptimizeWarning, OptimizeResult
@@ -452,8 +451,8 @@ def intlinprog(
     start_time = time()
 
     # tag: terminate
-    terminate = partial(
-        _terminate, start_time=start_time, maxiter=maxit)
+    terminate = lambda *args: _terminate(
+        best_node, start_time, nit, maxit)
 
     # Start branchin' and boundin'
     while True:
@@ -497,8 +496,7 @@ def intlinprog(
                     if np.allclose(uz, zbar):
                         # logging.info(
                         #     'Solution is optimal! Terminating.')
-                        return terminate(
-                            best_node=best_node, nit=nit)
+                        return terminate()
                     # NO -- fathomed by integrality
                     # logging.info('Fathomed by integrality!')
                     # GOTO: exhausted_test
@@ -539,7 +537,7 @@ def intlinprog(
         if Q.empty():
             # Termination
             # logging.info('No nodes on the Queue, terminating!')
-            return terminate(best_node=best_node, nit=nit)
+            return terminate()
         # NO
         # Select subdivision not yet analyzed completely
         cur_node = Q.get()
@@ -548,7 +546,7 @@ def intlinprog(
         nit += 1
         if nit >= maxit:
             # Quit if we timeout on number of iterations
-            return terminate(best_node=best_node, nit=nit)
+            return terminate()
 
         # Solve linear program over subdivision
         cur_node.solve()
@@ -567,6 +565,6 @@ if __name__ == '__main__':
         [15, 30],
     ]
     b = [40000, 200]
-    x0 = [1, 6]
-    res = intlinprog(c, A, b, search_strategy='depth-first', options={'maxiter': 7}, x0=x0)
+    x0 = [0, 6]
+    res = intlinprog(c, A, b, search_strategy='depth-first', options={'maxiter': 6}, x0=x0)
     print(res)
