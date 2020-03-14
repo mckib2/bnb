@@ -5,9 +5,12 @@ from queue import LifoQueue, Queue, PriorityQueue
 from time import time
 from collections import namedtuple
 from copy import deepcopy
+from warnings import warn
 
 import numpy as np
 from scipy.optimize import linprog
+
+from scipy.optimize import OptimizeResult, OptimizeWarning
 
 _ILPProblem = namedtuple(
     '_ILPProblem', 'c A_ub b_ub A_eq b_eq binary real_valued bounds')
@@ -105,7 +108,9 @@ def  _process_intlinprog_args(
     assert isinstance(binary, bool), 'binary must be a boolean!'
     if binary:
         if bounds is not None:
-            logging.warning('Ignoring supplied bounds, using binary.')
+            warn(
+                'Ignoring supplied bounds, using binary constraints.',
+                OptimizeWarning)
         bounds = [(0, 1)]*c.size
     elif bounds is None:
         bounds = [(0, None)]*c.size
@@ -120,28 +125,134 @@ def  _process_intlinprog_args(
     if real_valued is not None:
         real_valued = np.array(real_valued, dtype=bool).flatten()
         if real_valued.size != c.size:
-            raise ValueError(
-                'Expected real_valued mask of size %d but got %d' % (
-                    c.size, real_valued.size))
+            raise ValueError('Expected array of size %d but got %d'
+                             '' % (c.size, real_valued.size))
         if np.sum(real_valued) == c.size:
-            logging.warning('All variables are real-valued, this is a linear program!')
+            logging.warning('All variables are real-valued, this is '
+                            'a linear program!')
     else:
         # default: all variables are integer valued
         real_valued = np.zeros(c.size, dtype=bool)
 
     # Return sanitized values as an _ILPProblem:
-    return _ILPProblem(c, A_ub, b_ub, A_eq, b_eq, binary, real_valued, bounds)
+    return _ILPProblem(
+        c, A_ub, b_ub, A_eq, b_eq, binary, real_valued, bounds)
 
 def intlinprog(
         c, A_ub=None, b_ub=None, A_eq=None, b_eq=None, binary=False,
         real_valued=None, bounds=None, search_strategy='depth-first'):
-    '''Use branch and bound to solve mixed linear programs.'''
+    '''Use branch and bound to solve mixed linear programs.
 
-    ilp = _process_intlinprog_args(
-        c, A_ub, b_ub, A_eq, b_eq, binary, real_valued, bounds)
+    Parameters
+    ----------
+    c : 1-D array
+        The coefficients of the linear objective function to be
+        minimized.
+    A_ub : 2-D array, optional
+        The inequality constraint matrix. Each row of ``A_ub``
+        specifies the coefficients of a linear inequality constraint
+        on ``x``.
+    b_ub : 1-D array, optional
+        The inequality constraint vector. Each element represents an
+        upper bound on the corresponding value of ``A_ub @ x``.
+    A_eq : 2-D array, optional
+        The equality constraint matrix. Each row of ``A_eq`` specifies
+        the coefficients of a linear equality constraint on ``x``.
+    b_eq : 1-D array, optional
+        The equality constraint vector. Each element of ``A_eq @ x``
+        must equal the corresponding element of ``b_eq``.
+    binary : bool, optional
+        A convienience flag that indicates all solution variables are
+        binary, i.e., integer-valued with ``bnds = [(0, 1)]*c.size``.
+        Integer valued solution (``False``) is assumed by default.
+    real_valued : 1-D array, optional
+        Vector of real-valued constraints, specified as a boolean
+        mask. The ```True`` entries in ``real_valued`` indicate the
+        components of the solution ``x`` that are real-valued.  The
+        ``False`` entries indicate that the variable is
+        integer-valued.  By default, the mask is set to all ``False``
+        indicating all solution variables should be integral.
+    bounds : sequence, optional
+        A sequence of ``(min, max)`` pairs for each element in ``x``,
+        defining the minimum and maximum values of that decision
+        variable. Use ``None`` to indicate that there is no bound. By
+        default, bounds are ``(0, None)`` (all decision variables are
+        non-negative). If a single tuple ``(min, max)`` is provided,
+        then ``min`` and ``max`` will serve as bounds for all decision
+        variables.
+    search_strategy : {'depth-first', 'breadth-first', 'best-first'}, optional
+        The strategy for branch and bound to choose the next node in
+        the search tree.  By default `'depth-first'`is chosen.  "The
+        `'depth-first'` variant is recommended ... because it quickly
+        produces full solutions, and therefore upper bounds" [3]_.
 
-    # Choose queue type based on search strategy, see
-    # https://en.wikipedia.org/wiki/Branch_and_bound#Generic_version
+    Returns
+    -------
+    res : OptimizationResult
+        A :class:`scipy.optimize.OptimizeResult` consisting of the
+        fields:
+
+            x : 1-D array
+                The values of the integral and real-valued decision
+                variables from an associated linear program that
+                minimizes the objective function while satisfying the
+                constraints.
+            fun : float
+                The optimal value of the objective function ``c @ x``.
+            slack : 1-D array
+                The (nominally positive) values of the slack
+                variables of the associated linear program which
+                satisfies all integral constraints;
+                ``b_ub - A_ub @ x``
+            con : 1-D array
+                The (nominally zero) residuals of the equality
+                constraints, ``b_eq - A_eq @ x``.
+            success : bool
+                ``True`` when the algorithm succeeds in finding an
+                optimal solution.
+            status : int
+                An integer representing the exit status of the
+                algorithm.
+
+                ``0`` : Optimization terminated successfully.
+
+                ``1`` : Iteration limit reached.
+
+                ``2`` : Problem appears to be infeasible.
+
+                ``3`` : Problem appears to be unbounded.
+
+                ``4`` : Numerical difficulties encountered.
+
+            nit : int
+                The total number of iterations performed in all
+                phases, i.e. the number of nodes in the search tree.
+            message : str
+                A string descriptor of the exit status of the
+                algorithm.
+
+    Notes
+    -----
+
+    References
+    ----------
+    .. [1] Bradley, Stephen P., Arnoldo C. Hax, and Thomas L.
+           Magnanti. "Applied mathematical programming." (1977).
+    .. [2] Taylor, Bernard W., et al. Introduction to management
+           science. Prentice Hall, 2002.
+    .. [3] https://en.wikipedia.org/wiki/Branch_and_bound
+    '''
+
+    try:
+        ilp = _process_intlinprog_args(
+            c, A_ub, b_ub, A_eq, b_eq, binary, real_valued, bounds)
+    except AssertionError as e:
+        # _process_intlinprog_args uses assertions as a clean way to
+        # describe requirements on variables, but the correct
+        # Exception is probably ValueError:
+        raise ValueError(str(e))
+
+    # Choose queue type based on search strategy, see [3]_.
     search_strat = search_strategy.lower()
     try:
         Q = {
@@ -150,7 +261,7 @@ def intlinprog(
             'best-first': PriorityQueue,
         }[search_strat]()
     except KeyError:
-        raise ValueError('"%s" is not a valid search strategy!' % search_strategy)
+        raise ValueError('Unknown strategy %s' % search_strategy)
 
     # Get integer valued variables mask
     integer_valued = ~ilp.real_valued
@@ -198,7 +309,8 @@ def intlinprog(
         if not cur_node.feasible:
             logging.info('Node is infeasible!')
             # GOTO: exhausted_test
-        else: # NO
+        # NO
+        else:
 
             # Let z be its optimal value; is z <= uz?
             # YES
@@ -231,7 +343,8 @@ def intlinprog(
                     # NO -- fathomed by integrality
                     logging.info('Fathomed by integrality!')
                     # GOTO: exhausted_test
-                else: # NO
+                # NO
+                else:
 
                     # Generate new subdivisions from a fractional variable in the
                     # LP solution
