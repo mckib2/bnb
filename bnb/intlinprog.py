@@ -278,8 +278,9 @@ def intlinprog(
                 The (nominally zero) residuals of the equality
                 constraints, ``b_eq - A_eq @ x``.
             success : bool
-                ``True`` when the algorithm succeeds in finding an
-                optimal solution.
+                ``True`` when the algorithm succeeds in finding a
+                feasible solution (not necessarily optimal: see
+                ``status``).
             status : int
                 An integer representing the exit status of the
                 algorithm.
@@ -287,7 +288,7 @@ def intlinprog(
                 ``0`` : Optimization terminated successfully.
 
                 ``1`` : Iteration limit reached with feasible
-                        solution.
+                        solution (maybe suboptimal).
 
                 ``2`` : Iteration limit reached without feasible
                         solution.
@@ -374,7 +375,8 @@ def intlinprog(
     maxit = solver_options.get('maxiter', np.inf)
     res = OptimizeResult()
     messages = {
-        1: 'Iteration limit reached with feasible solution.',
+        1: ('Iteration limit reached with feasible solution '
+            '(maybe suboptimal).'),
         2: 'Iteration limit reached without feasible solution.',
     }
     start_time = time()
