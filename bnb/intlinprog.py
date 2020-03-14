@@ -158,7 +158,16 @@ def _add_info_from_lp_result(res, lp_res):
     if lp_res['status'] > 1:
         lp_res['status'] += 1
 
-    for k in ['con', 'slack', 'success', 'message', 'status']:
+    # Change message contents slightly for status 0 message to
+    # indicate that the optimal solution was found.
+    if 'message' not in res:
+        if lp_res['status'] == 0:
+            res['message'] = (
+                lp_res['message'][:-1] + ' (with optimal solution).')
+        else:
+            res['message'] = lp_res['message']
+
+    for k in ['con', 'slack', 'success', 'message']:
         # Only update if the key wasn't already set by ILP solver
         if k not in res:
             res[k] = lp_res[k]
@@ -285,7 +294,8 @@ def intlinprog(
                 An integer representing the exit status of the
                 algorithm.
 
-                ``0`` : Optimization terminated successfully.
+                ``0`` : Optimization terminated successfully (with
+                        optimal solution).
 
                 ``1`` : Iteration limit reached with feasible
                         solution (maybe suboptimal).
@@ -506,5 +516,5 @@ if __name__ == '__main__':
         [15, 30],
     ]
     b = [40000, 200]
-    res = intlinprog(c, A, b, search_strategy='depth-first', options={'maxiter': 6})
+    res = intlinprog(c, A, b, search_strategy='depth-first', options={'maxiter': 7})
     print(res)
