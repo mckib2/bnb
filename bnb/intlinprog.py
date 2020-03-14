@@ -195,7 +195,7 @@ def intlinprog(
         c, A_ub=None, b_ub=None, A_eq=None, b_eq=None, binary=False,
         real_valued=None, bounds=None, search_strategy='depth-first',
         options=None, lp_options=None):
-    '''Use branch and bound to solve mixed linear programs.
+    '''Use branch and bound to solve mixed integer linear programs.
 
     Parameters
     ----------
