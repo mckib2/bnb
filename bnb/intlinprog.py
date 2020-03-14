@@ -6,6 +6,7 @@ from time import time
 from collections import namedtuple
 from copy import deepcopy
 from warnings import warn
+from functools import partial
 
 import numpy as np
 from scipy.optimize import linprog, OptimizeWarning, OptimizeResult
@@ -162,6 +163,32 @@ def _add_info_from_lp_result(res, lp_res):
         # Only update if the key wasn't already set by ILP solver
         if k not in res:
             res[k] = lp_res[k]
+
+    return res
+
+def _terminate(best_node, res, start_time, nit, integer_valued):
+    '''Termination: return the best node as the solution.'''
+    # z = uz is optimal => node corresponding to uz is
+    # the solution node
+    if best_node.x is None:
+        msg = 'No solution found, returning empty node.'
+        warn(msg, OptimizeWarning)
+
+        # Variables we don't have because associated LP failed
+        res['con'] = None
+        res['slack'] = None
+    else:
+        # Grab info about solution node from LP OptimizationResult
+        res = _add_info_from_lp_result(res, best_node.lp_res)
+
+    res['execution_time'] = time() - start_time
+    res['fun'] = best_node.z
+    res['nit'] = nit
+    res['x'] = best_node.x
+
+    # Make integer values true integers
+    if best_node.x is not None:
+        res['x'][integer_valued] = np.round(res['x'][integer_valued])
 
     return res
 
@@ -347,35 +374,17 @@ def intlinprog(
 
     nit = 0
     maxit = solver_options.get('maxiter', np.inf)
-    start_time = time()
     res = OptimizeResult()
     messages = {
         1: 'Iteration limit reached with feasible solution.',
         2: 'Iteration limit reached without feasible solution.',
     }
+    start_time = time()
 
     # tag: terminate
-    def _terminate():
-        '''Termination: return the best node as the solution.'''
-        nonlocal res
-        # z = uz is optimal => node corresponding to uz is
-        # the solution node
-        if best_node.x is None:
-            msg = 'No solution found, returning empty node.'
-            warn(msg, OptimizeWarning)
-
-            # Variables we don't have because associated LP failed
-            res['con'] = None
-            res['slack'] = None
-        else:
-            # Grab info about solution node from LP OptimizationResult
-            res = _add_info_from_lp_result(res, best_node.lp_res)
-
-        res['execution_time'] = time() - start_time
-        res['fun'] = best_node.z
-        res['nit'] = nit
-        res['x'] = best_node.x
-        return res
+    terminate = partial(
+        _terminate, start_time=start_time,
+        integer_valued=integer_valued)
 
     # Start branchin' and boundin'
     while True:
@@ -419,7 +428,8 @@ def intlinprog(
                     if np.allclose(uz, zbar):
                         # logging.info(
                         #     'Solution is optimal! Terminating.')
-                        return _terminate()
+                        return terminate(
+                            res=res, best_node=best_node, nit=nit)
                     # NO -- fathomed by integrality
                     # logging.info('Fathomed by integrality!')
                     # GOTO: exhausted_test
@@ -460,7 +470,7 @@ def intlinprog(
         if Q.empty():
             # Termination
             # logging.info('No nodes on the Queue, terminating!')
-            return _terminate()
+            return terminate(res=res, best_node=best_node, nit=nit)
         # NO
         # Select subdivision not yet analyzed completely
         cur_node = Q.get()
@@ -477,7 +487,7 @@ def intlinprog(
             # Declare success if we found a feasible solution, might
             # not be optimal though:
             res['success'] = best_node.x is not None
-            return _terminate()
+            return terminate(res=res, best_node=best_node, nit=nit)
 
         # Solve linear program over subdivision
         cur_node.solve()
