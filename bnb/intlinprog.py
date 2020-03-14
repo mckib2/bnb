@@ -236,7 +236,7 @@ def intlinprog(
         variables.
     search_strategy : {'depth-first', 'breadth-first', 'best-first'}, optional
         The strategy for branch and bound to choose the next node in
-        the search tree.  By default `'depth-first'`is chosen.  "The
+        the search tree.  By default `'depth-first'` is chosen.  "The
         `'depth-first'` variant is recommended ... because it quickly
         produces full solutions, and therefore upper bounds" [3]_.
     options : dict, optional
@@ -265,9 +265,8 @@ def intlinprog(
 
             x : 1-D array
                 The values of the integral and real-valued decision
-                variables from an associated linear program that
-                minimizes the objective function while satisfying the
-                constraints.
+                variables that minimize the objective function while
+                satisfying the constraints.
             fun : float
                 The optimal value of the objective function ``c @ x``.
             slack : 1-D array
