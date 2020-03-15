@@ -10,6 +10,22 @@ from scipy.optimize import OptimizeWarning, OptimizeResult
 _ILPProblem = namedtuple(
     '_ILPProblem', 'c A_ub b_ub A_eq b_eq binary real_valued bounds')
 
+def _get_branch_rule_function(branch_rule):
+    '''Return function that gives branching rule.'''
+    if isinstance(branch_rule, str):
+        branch_rule = branch_rule.lower()
+
+    if callable(branch_rule):
+        return branch_rule
+    if branch_rule == 'max fraction':
+        return _branch_on_max_fraction
+    if branch_rule == 'most infeasible':
+        return _branch_on_most_infeasible
+    if branch_rule == 'max fun':
+        return _branch_on_max_fun
+
+    raise ValueError('Unknown branch rule %s' % branch_rule)
+
 def _process_intlinprog_args(
         c, A_ub, b_ub, A_eq, b_eq, binary, real_valued, bounds, x0):
     '''Sanitize input to intlinprog.'''

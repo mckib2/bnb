@@ -10,7 +10,7 @@ from scipy.optimize import OptimizeWarning
 from ._intlinprog_utils import (
     _make_result, _process_intlinprog_args, _print_disp_hdr,
     _print_iter_info, _branch_on_max_fun, _branch_on_max_fraction,
-    _branch_on_most_infeasible)
+    _branch_on_most_infeasible, _get_branch_rule_function)
 
 from ._intlinprog_node import _Node
 
@@ -345,22 +345,9 @@ def intlinprog(
 
     # Set up branch rule
     branch_rule = solver_options.get('branch_rule', 'most infeasible')
-    if isinstance(branch_rule, str):
-        branch_rule = branch_rule.lower()
-    if callable(branch_rule):
-        branch_on_variable = lambda *args: branch_rule(
-            cur_node, rtol, atol)
-    elif branch_rule == 'max fraction':
-        branch_on_variable = lambda *args: _branch_on_max_fraction(
-            cur_node, rtol, atol)
-    elif branch_rule == 'most infeasible':
-        branch_on_variable = lambda *args: _branch_on_most_infeasible(
-            cur_node, rtol, atol)
-    elif branch_rule == 'max fun':
-        branch_on_variable = lambda *args: _branch_on_max_fun(
-            cur_node, rtol, atol)
-    else:
-        raise ValueError('Unknown branch rule %s' % branch_rule)
+    _branch_on_variable = _get_branch_rule_function(branch_rule)
+    branch_on_variable = lambda *args: _branch_on_variable(
+        cur_node, rtol, atol)
 
     # tag: terminate
     terminate = lambda *args: _terminate(
