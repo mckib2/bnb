@@ -697,7 +697,6 @@ def intlinprog(
             # No nodes on the queue: termination
             # Assign the current node to be the best one and update
             # lower and upper bounds for the tree
-            cur_node = best_node
             uz = best_node.z
             zbar = max(leaf_costs.values())
             print_iter_info()
