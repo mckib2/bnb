@@ -881,24 +881,3 @@ if __name__ == '__main__':
         c, A, b,
         options={'disp': True, 'branch_rule': 'max fun'})
     print(res)
-
-    # c = [-2, -10, -13, -17, -7, -5, -7, -3]
-    # Aeq = [
-    #     [22, 13, 26, 33, 21, 3, 14, 26],
-    #     [39, 16, 22, 28, 26, 30, 23, 24],
-    #     [18, 14, 29, 27, 30, 38, 26, 26],
-    #     [41, 26, 28, 36, 18, 38, 16, 26],
-    # ]
-    # beq = [
-    #     7872,
-    #     10466,
-    #     11322,
-    #     12058,
-    # ]
-    # x0 = [8, 62, 23, 103, 53, 84, 46, 34]
-    # res = intlinprog(
-    #     c, A_eq=Aeq, b_eq=beq,
-    #     options={'disp': True},
-    #     search_strategy='breadth-first',
-    #     x0=x0)
-    # print(res)

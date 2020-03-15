@@ -1,5 +1,7 @@
 '''Test problems.
 
+TODO: try medium--large sized problems to how we do.
+
 References
 ----------
 .. [1] http://web.tecnico.ulisboa.pt/mcasquilho/compute/_linpro/TaylorB_module_c.pdf
@@ -9,15 +11,17 @@ References
 .. [5] http://www.math.clemson.edu/~mjs/courses/mthsc.440/integer.pdf
 .. [6] http://web.pdx.edu/~stipakb/download/PA557/ReadingsPA557sec6.pdf
 .. [7] https://www.isical.ac.in/~arijit/courses/autumn2016/ILP-Lecture-1.pdf
-.. [8] https://ncss-wpengine.netdna-ssl.com/wp-content/themes/ncss/pdf/Procedures/NCSS/Mixed_Integer_Programming.pdf
+.. [8] https://ncss-wpengine.netdna-ssl.com/wp-content/themes/ncss/pdf/Procedures/NCSS/
+       Mixed_Integer_Programming.pdf
 .. [9] https://www.cs.upc.edu/~erodri/webpage/cps/theory/lp/milp/slides.pdf
 .. [10] https://www.mathworks.com/help/optim/ug/mixed-integer-linear-programming-basics.html
+.. [11] https://www.mathworks.com/help/optim/ug/intlinprog.html
 '''
 
 import unittest
 
 import numpy as np
-from bnb import intprog
+from bnb import intlinprog
 
 class TestProblems(unittest.TestCase):
     '''Validation integer programming problems.'''
@@ -30,7 +34,7 @@ class TestProblems(unittest.TestCase):
             [15, 30],
         ]
         b = [40000, 200]
-        res = intprog(c, A, b)
+        res = intlinprog(c, A, b)
         self.assertEqual(res['x'].tolist(), [1, 6])
         self.assertEqual(res['fun'], 1000)
 
@@ -43,7 +47,7 @@ class TestProblems(unittest.TestCase):
             [1, 1, 0, 0],
         ]
         b = [120000, 12, 1]
-        res = intprog(c, A, b)
+        res = intlinprog(c, A, b)
         self.assertEqual(res['x'].tolist(), [1, 0, 1, 0])
         self.assertEqual(res['fun'], 700)
 
@@ -56,7 +60,7 @@ class TestProblems(unittest.TestCase):
             [2, 3],
         ]
         b = [1, 12, 12]
-        res = intprog(c, A, b)
+        res = intlinprog(c, A, b)
         self.assertTrue(res['x'].tolist() == [1, 2] or res['x'].tolist() == [2, 2])
         self.assertEqual(res['fun'], 2)
 
@@ -68,7 +72,7 @@ class TestProblems(unittest.TestCase):
             [5, 9],
         ]
         b = [6, 45]
-        res = intprog(c, A, b)
+        res = intlinprog(c, A, b)
         self.assertEqual(res['x'].tolist(), [0, 5])
         self.assertEqual(res['fun'], 40)
 
@@ -81,7 +85,7 @@ class TestProblems(unittest.TestCase):
             [.2, .2, .3, .1],
         ]
         b = [3.1, 2.5, .4]
-        res = intprog(c, A, b, binary=True)
+        res = intlinprog(c, A, b, binary=True)
         self.assertEqual(res['x'].tolist(), [0, 0, 1, 1])
         self.assertEqual(res['fun'], .6)
 
@@ -92,7 +96,7 @@ class TestProblems(unittest.TestCase):
             [5, 7, 4, 3],
         ]
         b = [14]
-        res = intprog(c, A, b, binary=True)
+        res = intlinprog(c, A, b, binary=True)
         self.assertEqual(res['x'].tolist(), [0, 1, 1, 1])
         self.assertEqual(res['fun'], 21)
 
@@ -103,7 +107,7 @@ class TestProblems(unittest.TestCase):
             [.2, .5, .2, .2, .3],
         ]
         b = [.8]
-        res = intprog(c, A, b, binary=True)
+        res = intlinprog(c, A, b, binary=True)
         self.assertEqual(res['x'].tolist(), [0, 1, 0, 1, 0])
         self.assertEqual(res['fun'], 60)
 
@@ -115,7 +119,7 @@ class TestProblems(unittest.TestCase):
             [7, 0, 2, 1],
         ]
         b = [14, 10]
-        res = intprog(c, A, b, binary=True)
+        res = intlinprog(c, A, b, binary=True)
         self.assertEqual(res['x'].tolist(), [0, 1, 1, 1])
         self.assertEqual(res['fun'], 21)
 
@@ -136,7 +140,7 @@ class TestProblems(unittest.TestCase):
         ]
         b_eq = [10]
         bnds = [(0, 10)]*4
-        res = intprog(c, A_ub, b_ub, A_eq, b_eq, bounds=bnds)
+        res = intlinprog(c, A_ub, b_ub, A_eq, b_eq, bounds=bnds)
         self.assertTrue(np.allclose(res['x'], [3, 4, 2, 1]))
         self.assertEqual(res['fun'], 9)
 
@@ -148,7 +152,7 @@ class TestProblems(unittest.TestCase):
             [-8, 10],
         ]
         b = [-1, 13]
-        res = intprog(c, A, b)
+        res = intlinprog(c, A, b)
         self.assertEqual(res['x'].tolist(), [1, 2])
         self.assertEqual(res['fun'], 3)
 
@@ -163,9 +167,70 @@ class TestProblems(unittest.TestCase):
         b = [25, 1.25, 1.25]
         bnds = [(0, 1)]*4 + [(0, None)]*4
         rv = [False]*4 + [True]*4
-        res = intprog(c, A_eq=A, b_eq=b, real_valued=rv, bounds=bnds)
+        res = intlinprog(c, A_eq=A, b_eq=b, real_valued=rv, bounds=bnds)
         self.assertTrue(np.allclose(res['x'], [1, 1, 0, 1, 7.25, 0, .25, 3.5]))
         self.assertTrue(np.allclose(res['fun'], 8495))
+
+    def test_prob13(self):
+        '''MIP example from [11]_.'''
+        c = [3, 2, 1]
+        A_ub = [
+            [1, 1, 1],
+        ]
+        b_ub = [7]
+        # add constraint to match MATLAB solution -- the solution
+        # that we would have found otherwise would be still be
+        # optimal, but there are multiple optima to this problem
+        A_eq = [
+            [4, 2, 1],
+            [0, 0, 1],
+        ]
+        b_eq = [12, 1]
+        bnds = [(0, None)]*2 + [(0, 1)]
+        res = intlinprog(
+            c, A_ub, b_ub, A_eq, b_eq,
+            real_valued=[True, True, False], bounds=bnds)
+        self.assertEqual(res['x'].tolist(), [0, 5.5, 1])
+        self.assertEqual(res['fun'], 12)
+
+    def test_prob14(self):
+        '''MIP example from [11]_.'''
+        c = [-8, -1]
+        real_valued = [True, False]
+        A_ub = [
+            [-1, -2],
+            [-4, -1],
+            [2, 1],
+        ]
+        b_ub = [14, -33, 20]
+        res = intlinprog(c, A_ub, b_ub, real_valued=real_valued)
+        self.assertEqual(res['x'].tolist(), [6.5, 7])
+        self.assertEqual(res['fun'], -59)
+
+    @unittest.skip('Medium sized problem, takes a while.')
+    def test_prob15(self):
+        '''Medium sized MIP problem from [11]_.'''
+        c = [-2, -10, -13, -17, -7, -5, -7, -3]
+        Aeq = [
+            [22, 13, 26, 33, 21, 3, 14, 26],
+            [39, 16, 22, 28, 26, 30, 23, 24],
+            [18, 14, 29, 27, 30, 38, 26, 26],
+            [41, 26, 28, 36, 18, 38, 16, 26],
+        ]
+        beq = [
+            7872,
+            10466,
+            11322,
+            12058,
+        ]
+        x0 = [8, 62, 23, 103, 53, 84, 46, 34]
+        res = intlinprog(
+            c, A_eq=Aeq, b_eq=beq,
+            options={'disp': True},
+            search_strategy='breadth-first',
+            x0=x0)
+        print(res)
+        self.assertTrue(np.allclose(res['fun'], -1854))
 
 if __name__ == '__main__':
     unittest.main()
