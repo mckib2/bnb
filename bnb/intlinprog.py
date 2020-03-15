@@ -338,8 +338,13 @@ def intlinprog(
                 ``4`` : Numerical difficulties encountered.
 
             nit : int
-                The current iteration number (number of nodes
-                evaluated in the search tree).
+                The total number of iterations performed, i.e. the
+                number of nodes evaluated in the search tree.
+            execution_time : float
+                The number of seconds taken to find the current node.
+            depth : int
+                What level in the search tree the solution node was
+                found at.
             message : str
                 A string descriptor of the algorithm status.
 
@@ -406,12 +411,14 @@ def intlinprog(
                 ``4`` : Numerical difficulties encountered.
 
             nit : int
-                The total number of iterations performed in all
-                phases, i.e. the number of nodes evaluated in the
-                search tree.
+                The total number of iterations performed, i.e. the
+                number of nodes evaluated in the search tree.
             execution_time : float
                 The number of seconds taken to find the optimal
                 solution with integral constraints.
+            depth : int
+                What level in the search tree the solution node was
+                found at.
             message : str
                 A string descriptor of the exit status of the
                 algorithm.
@@ -427,6 +434,14 @@ def intlinprog(
     solution will still require a search starting from the first node,
     but which might proceed more quickly due to the possibility of
     more aggressive pruning.
+
+    The ``depth`` field of the result indicates how deep in the tree
+    or on what level of tree the solution node was found.  This can
+    be used to determine which search strategy should be prefered if
+    depths are similar for similar types of problems.  For example,
+    if solution nodes are most often found at high depths, then the
+    ``depth-first`` search strategy may be able to find them more
+    quickly.
 
     References
     ----------
