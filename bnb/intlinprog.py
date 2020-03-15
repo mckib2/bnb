@@ -6,6 +6,9 @@ from collections import namedtuple
 from copy import deepcopy
 from warnings import warn
 
+# import warnings
+# warnings.filterwarnings("error")
+
 import numpy as np
 from scipy.optimize import linprog, OptimizeWarning, OptimizeResult
 
@@ -37,6 +40,7 @@ class _Node:
             options=self.lp_solver_options)
         self.lp_res = lp_res
 
+
         if not lp_res['success']:
             self.feasible = False
         else:
@@ -47,12 +51,40 @@ class _Node:
     def change_upper_bound(self, idx, upper):
         '''Constrain a single variable to be below a value.'''
         prev = self.ilp.bounds[idx]
-        self.ilp.bounds[idx] = (prev[0], upper)
+
+        # If we are setting bounds to be equal, then we actually
+        # need a constraint
+        if prev[0] == upper:
+            self.add_eq_constraint(idx, upper)
+            self.ilp.bounds[idx] = (0, None)
+        else:
+            self.ilp.bounds[idx] = (prev[0], upper)
 
     def change_lower_bound(self, idx, lower):
         '''Constrain a single variable to be above a value.'''
         prev = self.ilp.bounds[idx]
-        self.ilp.bounds[idx] = (lower, prev[1])
+
+        # If we are setting bounds to be equal, then we actually
+        # need a constraint
+        if prev[0] == lower:
+            self.add_eq_constraint(idx, lower)
+            self.ilp.bounds[idx] = (0, None)
+        else:
+            self.ilp.bounds[idx] = (lower, prev[1])
+
+    def add_eq_constraint(self, idx, val):
+        '''Add a row to A_eq and b_eq.'''
+
+        # Hacky solution relying on provate method of namedtuple:
+        if self.ilp.A_eq is None:
+            self.ilp = self.ilp._replace(
+                A_eq=np.zeros((0, self.ilp.c.size)),
+                b_eq=np.zeros(0))
+        A_eq_new = np.zeros((1, self.ilp.A_eq.shape[1]))
+        A_eq_new[:, idx] = 1
+        self.ilp = self.ilp._replace(
+            A_eq=np.concatenate((self.ilp.A_eq, A_eq_new)),
+            b_eq=np.concatenate((self.ilp.b_eq, [val])))
 
     def __lt__(self, other):
         '''Node comparison for best-first search strategy.'''
@@ -84,7 +116,7 @@ class _Node:
         cls._node_ctr += 1
         return cls._node_ctr
 
-def  _process_intlinprog_args(
+def _process_intlinprog_args(
         c, A_ub, b_ub, A_eq, b_eq, binary, real_valued, bounds, x0):
     '''Sanitize input to intlinprog.'''
 
@@ -327,9 +359,12 @@ def intlinprog(
         The equality constraint vector. Each element of ``A_eq @ x``
         must equal the corresponding element of ``b_eq``.
     binary : bool, optional
-        A convienience flag that indicates all solution variables are
-        binary, i.e., integer-valued with ``bnds = [(0, 1)]*c.size``.
-        Integer valued solution (``False``) is assumed by default.
+        A flag that indicates all solution variables are  binary,
+        i.e., integer-valued with ``bnds = [(0, 1)]*c.size`.
+        Additionally, branches will be created by adding equality
+        constraints to the linear program relaxations as opposed to
+        inequality constraints.  Integer valued solution (``False``)
+        is assumed by default.
     real_valued : 1-D array, optional
         Vector of real-valued constraints, specified as a boolean
         mask. The ```True`` entries in ``real_valued`` indicate the
@@ -408,6 +443,14 @@ def intlinprog(
                 Maximum number of nodes to evaluate.
                 Default: ``inf`` (keep going until provably optimal
                 solution is found).
+            rtol : float
+                The relative tolerance parameter when testing a
+                solution variable for integrality.  Default: ``1e-5``.
+                See :ref:`<numpy.allclose>` for more details.
+            atol : float
+                The absolute tolerance parameter when testing a
+                solution variable for integrality.  Default: ``1e-8``.
+                See :ref:`<numpy.allclose>` for more details.
             disp : bool
                 Set to ``True`` to print convergence messages.
                 Default: ``False``.
@@ -557,6 +600,8 @@ def intlinprog(
 
     # Get integer valued variables mask
     integer_valued = ~ilp.real_valued
+    rtol = solver_options.get('rtol', 1e-5)
+    atol = solver_options.get('atol', 1e-8)
 
     # Let uz = value of best known feasible solution (-inf if none
     # known).  We are looking for the best node -- initialize as the
@@ -596,7 +641,7 @@ def intlinprog(
         table_fmt = _print_disp_hdr()
         print_iter_info = lambda *args: _print_iter_info(
             table_fmt, num_integral_sol, nit, start_time,
-            cur_node.ilp.c @ cur_node.x, uz, zbar)
+            cur_node.z, uz, zbar)
     else:
         print_iter_info = lambda *args: None
 
@@ -628,7 +673,8 @@ def intlinprog(
                 # YES
                 if np.allclose(
                         cur_node.x[integer_valued],
-                        np.round(cur_node.x[integer_valued])):
+                        np.round(cur_node.x[integer_valued]),
+                        rtol=rtol, atol=atol):
 
                     # Found integer solution!
                     num_integral_sol += 1
@@ -664,13 +710,31 @@ def intlinprog(
                     # Rule for branching: choose variable with largest
                     # residual as in [2]_.
                     x0 = cur_node.x.copy()
+
+                    # Filter out basically integral variables
+                    x0[np.abs(x0 - np.round(x0)) < (atol + rtol*np.abs(x0))] = np.nan
+
                     # Only choose from integer-valued variables:
                     x0[ilp.real_valued] = np.nan
                     idx = np.nanargmax(x0 - np.floor(x0))
-                    n1.change_upper_bound(
-                        idx, np.floor(cur_node.x[idx]))
-                    n2.change_lower_bound(
-                        idx, np.ceil(cur_node.x[idx]))
+
+                    # If it's binary, use equality constraints,
+                    # otherwise split bound condition
+                    if ilp.binary and ilp.bounds[idx] == (0, 1):
+                        n1.add_eq_constraint(idx, 0)
+                        n2.add_eq_constraint(idx, 1)
+                    else:
+                        n1.change_upper_bound(
+                            idx, np.floor(cur_node.x[idx]))
+                        n2.change_lower_bound(
+                            idx, np.ceil(cur_node.x[idx]))
+
+                        # # This happens quite often:
+                        # if n1.ilp.bounds[idx][0] == n1.ilp.bounds[idx][1]:
+                        #     print('Found n1 equality!')
+                        #     print(n1.ilp.bounds[idx])
+                        # if n2.ilp.bounds[idx][0] == n2.ilp.bounds[idx][1]:
+                        #     print('Found n2 equality!')
 
                     # Put new division on the Queue -- nodes must be
                     # solved now so the cost of all leaf nodes is
@@ -697,6 +761,7 @@ def intlinprog(
             # No nodes on the queue: termination
             # Assign the current node to be the best one and update
             # lower and upper bounds for the tree
+            cur_node = best_node
             uz = best_node.z
             zbar = max(leaf_costs.values())
             print_iter_info()
@@ -741,14 +806,34 @@ if __name__ == '__main__':
     #     x0=x0)
     # print(res)
 
-    c = [300, 90, 400, 150]
-    A = [
-        [35000, 10000, 25000, 90000],
-        [4, 2, 7, 3],
-        [1, 1, 0, 0],
+    # c = [300, 90, 400, 150]
+    # A = [
+    #     [35000, 10000, 25000, 90000],
+    #     [4, 2, 7, 3],
+    #     [1, 1, 0, 0],
+    # ]
+    # b = [120000, 12, 1]
+    # res = intlinprog(
+    #     c, A, b,
+    #     options={'disp': True})
+    # print(res)
+
+    c = [-2, -10, -13, -17, -7, -5, -7, -3]
+    Aeq = [
+        [22, 13, 26, 33, 21, 3, 14, 26],
+        [39, 16, 22, 28, 26, 30, 23, 24],
+        [18, 14, 29, 27, 30, 38, 26, 26],
+        # [41, 26, 28, 36, 18, 38, 16, 26],
     ]
-    b = [120000, 12, 1]
+    beq = [
+        7872,
+        10466,
+        11322,
+        # 12058,
+    ]
+    x0 = [8, 62, 23, 103, 53, 84, 46, 34]
     res = intlinprog(
-        c, A, b,
-        options={'disp': True})
+        c, A_eq=Aeq, b_eq=beq,
+        options={'disp': True},
+        lp_options={'tol': 1e-8}, x0=x0)
     print(res)
