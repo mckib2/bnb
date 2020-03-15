@@ -3,12 +3,25 @@
 from warnings import warn
 from time import time
 from collections import namedtuple
+from queue import LifoQueue, Queue, PriorityQueue
 
 import numpy as np
 from scipy.optimize import OptimizeWarning, OptimizeResult
 
 _ILPProblem = namedtuple(
     '_ILPProblem', 'c A_ub b_ub A_eq b_eq binary real_valued bounds')
+
+def _get_Queue(search_strategy):
+    '''Return the correct Queue type based on search_strategy.'''
+    search_strat = search_strategy.lower()
+    try:
+        return {
+            'depth-first': LifoQueue,
+            'breadth-first': Queue,
+            'best-first': PriorityQueue,
+        }[search_strat]()
+    except KeyError:
+        raise ValueError('Unknown strategy %s' % search_strategy)
 
 def _get_branch_rule_function(branch_rule):
     '''Return function that gives branching rule.'''

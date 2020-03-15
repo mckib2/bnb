@@ -1,6 +1,5 @@
 '''Interface for mixed integer linear programs.'''
 
-from queue import LifoQueue, Queue, PriorityQueue
 from time import time
 from warnings import warn
 
@@ -9,8 +8,7 @@ from scipy.optimize import OptimizeWarning
 
 from ._intlinprog_utils import (
     _make_result, _process_intlinprog_args, _print_disp_hdr,
-    _print_iter_info, _branch_on_max_fun, _branch_on_max_fraction,
-    _branch_on_most_infeasible, _get_branch_rule_function)
+    _print_iter_info, _get_branch_rule_function, _get_Queue)
 
 from ._intlinprog_node import _Node
 
@@ -286,15 +284,7 @@ def intlinprog(
     _Node.global_set_lp_solver_options(lp_solver_options)
 
     # Choose queue type based on search strategy, see [3]_.
-    search_strat = search_strategy.lower()
-    try:
-        Q = {
-            'depth-first': LifoQueue,
-            'breadth-first': Queue,
-            'best-first': PriorityQueue,
-        }[search_strat]()
-    except KeyError:
-        raise ValueError('Unknown strategy %s' % search_strategy)
+    Q = _get_Queue(search_strategy)
 
     # Get integer valued variables mask
     integer_valued = ~ilp.real_valued
