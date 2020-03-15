@@ -246,23 +246,48 @@ def _make_result(node, nit, maxiter, start_time, is_callback=False):
     res['message'] = messages[res['status']]
     return res
 
-def _print_disp_hdr():
+def _print_disp_hdr(fmt=None):
     '''Print the header of the disp output.'''
     cols = [
-        'num int solution',
-        'nodes explored',
-        'total time (s)',
-        'integer fval',
-        'relative gap (%)',
+        'num int\nsolution',
+        'nodes\nexplored',
+        'total\ntime (s)',
+        'integer\nfval',
+        'relative\ngap (%)',
     ]
-    print('\t'.join(cols))
 
-def _print_iter_info(nsol, nit, start_time, fval, uz, zbar):
+    # Split out into different header rows
+    num_hdr_rows = max([len(col.split('\n')) for col in cols])
+    hdr_rows = []
+    for ii in range(num_hdr_rows):
+        hdr_rows.append([])
+        for col in cols:
+            split_col = col.split('\n')
+            hdr_rows[ii].append(split_col[ii])
+
+    if fmt is None:
+        fmt = []
+        for ii, col in enumerate(cols):
+            fmt.append('{%d:%d}' % (ii, max(len(c) for c in col.split('\n'))))
+        fmt = '  '.join(fmt)
+
+    print('\nBranch and bound:\n')
+    for ii, hdr_row in enumerate(hdr_rows):
+        print(fmt.format(*hdr_row))
+    return fmt
+
+def _print_iter_info(fmt, nsol, nit, start_time, fval, uz, zbar):
     '''Print a single line of the disp output.'''
     rgap = 100*(1 - uz/zbar)
     ttol = time() - start_time
-    cols = [str(nsol), str(nit), str(ttol), str(fval), str(rgap)]
-    print('\t'.join(cols))
+    cols = [
+        str(nsol),
+        str(nit),
+        '%.3g' % ttol,
+        '%g' % fval,
+        '%g' % rgap,
+    ]
+    print(fmt.format(*cols))
 
 def _terminate(best_node, start_time, nit, maxiter):
     '''Termination: return the best node as the solution.'''
@@ -549,9 +574,9 @@ def intlinprog(
     # Set up disp header if needed
     disp = solver_options.get('disp', False)
     if disp:
-        _print_disp_hdr()
+        table_fmt = _print_disp_hdr()
         print_iter_info = lambda *args: _print_iter_info(
-            num_feasible_sol, nit, start_time,
+            table_fmt, num_feasible_sol, nit, start_time,
             cur_node.ilp.c @ cur_node.x, uz, zbar)
     else:
         print_iter_info = lambda *args: None
