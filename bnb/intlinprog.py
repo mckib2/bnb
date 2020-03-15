@@ -15,8 +15,9 @@ _ILPProblem = namedtuple(
 
 class _Node:
     '''Encapsulate an LP in the search.'''
-    def __init__(self, ilp, parent_cost=-1*np.inf):
+    def __init__(self, ilp, parent_cost=-1*np.inf, depth=None):
         self.id = self.take_num()
+        self.depth = depth # tree depth
         self.ilp = deepcopy(ilp)
         self.parent_cost = parent_cost # used for best-first search
 
@@ -233,6 +234,7 @@ def _make_result(node, nit, maxiter, start_time, is_callback=False):
     res['fun'] = node.z
     res['nit'] = nit
     res['x'] = node.x
+    res['depth'] = node.depth
 
     # Make integer values true integers
     if node.x is not None:
@@ -495,7 +497,7 @@ def intlinprog(
         uz = -1*np.inf
 
     # Solve the associated LP
-    cur_node = _Node(ilp)
+    cur_node = _Node(ilp, depth=0)
     cur_node.solve()
 
     # Let zbar be its optimal value
@@ -562,8 +564,12 @@ def intlinprog(
 
                     # Generate new subdivisions from a fractional
                     # variable in the LP solution
-                    n1 = _Node(cur_node.ilp, cur_node.z)
-                    n2 = _Node(cur_node.ilp, cur_node.z)
+                    n1 = _Node(
+                        cur_node.ilp, cur_node.z,
+                        depth=cur_node.depth+1)
+                    n2 = _Node(
+                        cur_node.ilp, cur_node.z,
+                        depth=cur_node.depth+1)
 
                     # Rule for branching: choose variable with largest
                     # residual as in [2]_.
@@ -597,7 +603,8 @@ def intlinprog(
             return terminate()
         # NO
 
-        # Call callback before we grab the next node from the Queue
+        # Call callback before we grab the next node from the Queue;
+        # uses cur_node to generate OptimizeResult
         do_callback()
 
         # Select subdivision not yet analyzed completely
@@ -627,5 +634,9 @@ if __name__ == '__main__':
     ]
     b = [40000, 200]
     x0 = [0, 6]
-    res = intlinprog(c, A, b, search_strategy='depth-first', options={'maxiter': 6}, x0=x0)
+    res = intlinprog(
+        c, A, b,
+        search_strategy='depth-first',
+        options={'maxiter': np.inf},
+        x0=x0)
     print(res)
