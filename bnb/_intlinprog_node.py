@@ -106,9 +106,8 @@ class _Node:
     _node_ctr = 0
     @classmethod
     def take_num(cls):
-        '''Return a number unique to the node instance.
-
-        This is intended for use when plotting search trees.
-        '''
+        '''Return a number unique to the node instance.  This is used
+        for keeping track of the cost of leaf nodes when updating
+        zbar (global upper bound).'''
         cls._node_ctr += 1
         return cls._node_ctr
