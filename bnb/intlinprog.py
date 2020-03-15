@@ -32,15 +32,22 @@ class _Node:
 
     def solve(self):
         '''Solve the LP relaxation.'''
-        lp_res = linprog(
-            -1*self.ilp.c,
-            self.ilp.A_ub, self.ilp.b_ub,
-            self.ilp.A_eq, self.ilp.b_eq,
-            bounds=self.ilp.bounds, method='revised simplex',
-            options=self.lp_solver_options)
+        try:
+            # method = 'interior-point'
+            method = 'revised simplex'
+            lp_res = linprog(
+                -1*self.ilp.c,
+                self.ilp.A_ub, self.ilp.b_ub,
+                self.ilp.A_eq, self.ilp.b_eq,
+                bounds=self.ilp.bounds, method=method,
+                options=self.lp_solver_options)
+        except ValueError as _e:
+            # This is an infeasibility exception -- assume infeasible
+            # print(e)
+            lp_res = {}
+            lp_res['success'] = False
+
         self.lp_res = lp_res
-
-
         if not lp_res['success']:
             self.feasible = False
         else:
@@ -323,6 +330,36 @@ def _print_iter_info(fmt, nsol, nit, start_time, fval, uz, zbar):
     ]
     print(fmt.format(*cols))
 
+def _branch_on_most_infeasible(node, _rtol, _atol):
+    '''Branch on non-integral variable with fraction closest to 1/2.
+    '''
+    return np.argmin(np.abs(node.x - np.floor(node.x) - 0.5))
+
+def _branch_on_max_fun(node, rtol, atol):
+    '''Branch on non-integral variable with max corresponding
+    component in the absolute value of the objective function.'''
+
+    # Filter out basically integral variables
+    x0 = node.x.copy()
+    x0[np.abs(x0 - np.round(x0)) < (atol + rtol*np.abs(x0))] = np.nan
+
+    # Only choose from integer-valued variables:
+    x0[node.ilp.real_valued] = np.nan
+    return np.nanargmax(np.abs(node.ilp.c*x0))
+
+def _branch_on_max_fraction(node, rtol, atol):
+    '''Branch on non-integral variable with highest fractional part.
+    '''
+
+    # Filter out basically integral variables
+    x0 = node.x.copy()
+    x0[np.abs(x0 - np.round(x0)) < (atol + rtol*np.abs(x0))] = np.nan
+
+    # Only choose from integer-valued variables:
+    x0[node.ilp.real_valued] = np.nan
+
+    return np.nanargmax(x0 - np.floor(x0))
+
 def _terminate(best_node, start_time, nit, num_integral_sol, maxiter):
     '''Termination: return the best node as the solution.'''
     # z = uz is optimal => node corresponding to uz is
@@ -383,8 +420,10 @@ def intlinprog(
     search_strategy : {'depth-first', 'breadth-first', 'best-first'}, optional
         The strategy for branch and bound to choose the next node in
         the search tree.  By default `'depth-first'` is chosen.  "The
-        `'depth-first'` variant is recommended ... because it quickly
-        produces full solutions, and therefore upper bounds" [3]_.
+        `'depth-first'` variant is recommended when no good heuristic
+        is available for producing an initial solution, because it
+        quickly produces full solutions, and therefore upper bounds"
+        [3]_.
     callback : callable, optional
         If a callback function is provided, it will be called at least
         once per iteration of the algorithm. The callback function
@@ -451,6 +490,11 @@ def intlinprog(
                 The absolute tolerance parameter when testing a
                 solution variable for integrality.  Default: ``1e-8``.
                 See :ref:`<numpy.allclose>` for more details.
+            branch_rule : callable or {'max fraction', 'most infeasible', 'max fun'}
+                Rule for choosing the component for branching.  If
+                ``callable``, the function will be called like
+                ``branch_rule(node, rtol, atol)``.  Default is
+                `'most infeasible'`.
             disp : bool
                 Set to ``True`` to print convergence messages.
                 Default: ``False``.
@@ -645,6 +689,25 @@ def intlinprog(
     else:
         print_iter_info = lambda *args: None
 
+    # Set up branch rule
+    branch_rule = solver_options.get('branch_rule', 'most infeasible')
+    if isinstance(branch_rule, str):
+        branch_rule = branch_rule.lower()
+    if callable(branch_rule):
+        branch_on_variable = lambda *args: branch_rule(
+            cur_node, rtol, atol)
+    elif branch_rule == 'max fraction':
+        branch_on_variable = lambda *args: _branch_on_max_fraction(
+            cur_node, rtol, atol)
+    elif branch_rule == 'most infeasible':
+        branch_on_variable = lambda *args: _branch_on_most_infeasible(
+            cur_node, rtol, atol)
+    elif branch_rule == 'max fun':
+        branch_on_variable = lambda *args: _branch_on_max_fun(
+            cur_node, rtol, atol)
+    else:
+        raise ValueError('Unknown branch rule %s' % branch_rule)
+
     # tag: terminate
     terminate = lambda *args: _terminate(
         best_node, start_time, nit, num_integral_sol, maxit)
@@ -709,14 +772,15 @@ def intlinprog(
 
                     # Rule for branching: choose variable with largest
                     # residual as in [2]_.
-                    x0 = cur_node.x.copy()
-
-                    # Filter out basically integral variables
-                    x0[np.abs(x0 - np.round(x0)) < (atol + rtol*np.abs(x0))] = np.nan
-
-                    # Only choose from integer-valued variables:
-                    x0[ilp.real_valued] = np.nan
-                    idx = np.nanargmax(x0 - np.floor(x0))
+                    idx = branch_on_variable()
+                    # x0 = cur_node.x.copy()
+                    #
+                    # # Filter out basically integral variables
+                    # x0[np.abs(x0 - np.round(x0)) < (atol + rtol*np.abs(x0))] = np.nan
+                    #
+                    # # Only choose from integer-valued variables:
+                    # x0[ilp.real_valued] = np.nan
+                    # idx = np.nanargmax(x0 - np.floor(x0))
 
                     # If it's binary, use equality constraints,
                     # otherwise split bound condition
@@ -806,34 +870,35 @@ if __name__ == '__main__':
     #     x0=x0)
     # print(res)
 
-    # c = [300, 90, 400, 150]
-    # A = [
-    #     [35000, 10000, 25000, 90000],
-    #     [4, 2, 7, 3],
-    #     [1, 1, 0, 0],
-    # ]
-    # b = [120000, 12, 1]
-    # res = intlinprog(
-    #     c, A, b,
-    #     options={'disp': True})
-    # print(res)
-
-    c = [-2, -10, -13, -17, -7, -5, -7, -3]
-    Aeq = [
-        [22, 13, 26, 33, 21, 3, 14, 26],
-        [39, 16, 22, 28, 26, 30, 23, 24],
-        [18, 14, 29, 27, 30, 38, 26, 26],
-        # [41, 26, 28, 36, 18, 38, 16, 26],
+    c = [300, 90, 400, 150]
+    A = [
+        [35000, 10000, 25000, 90000],
+        [4, 2, 7, 3],
+        [1, 1, 0, 0],
     ]
-    beq = [
-        7872,
-        10466,
-        11322,
-        # 12058,
-    ]
-    x0 = [8, 62, 23, 103, 53, 84, 46, 34]
+    b = [120000, 12, 1]
     res = intlinprog(
-        c, A_eq=Aeq, b_eq=beq,
-        options={'disp': True},
-        lp_options={'tol': 1e-8}, x0=x0)
+        c, A, b,
+        options={'disp': True, 'branch_rule': 'max fun'})
     print(res)
+
+    # c = [-2, -10, -13, -17, -7, -5, -7, -3]
+    # Aeq = [
+    #     [22, 13, 26, 33, 21, 3, 14, 26],
+    #     [39, 16, 22, 28, 26, 30, 23, 24],
+    #     [18, 14, 29, 27, 30, 38, 26, 26],
+    #     [41, 26, 28, 36, 18, 38, 16, 26],
+    # ]
+    # beq = [
+    #     7872,
+    #     10466,
+    #     11322,
+    #     12058,
+    # ]
+    # x0 = [8, 62, 23, 103, 53, 84, 46, 34]
+    # res = intlinprog(
+    #     c, A_eq=Aeq, b_eq=beq,
+    #     options={'disp': True},
+    #     search_strategy='breadth-first',
+    #     x0=x0)
+    # print(res)
