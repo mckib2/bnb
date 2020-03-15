@@ -15,9 +15,10 @@ _ILPProblem = namedtuple(
 
 class _Node:
     '''Encapsulate an LP in the search.'''
-    def __init__(self, ilp, parent_cost=-1*np.inf, depth=None):
+    def __init__(self, ilp, parent_cost=-1*np.inf, depth=None, parent_id=None):
         self.id = self.take_num()
         self.depth = depth # tree depth
+        self.parent_id = parent_id
         self.ilp = deepcopy(ilp)
         self.parent_cost = parent_cost # used for best-first search
 
@@ -244,6 +245,24 @@ def _make_result(node, nit, maxiter, start_time, is_callback=False):
     # Look up message and return result
     res['message'] = messages[res['status']]
     return res
+
+def _print_disp_hdr():
+    '''Print the header of the disp output.'''
+    cols = [
+        'num int solution',
+        'nodes explored',
+        'total time (s)',
+        'integer fval',
+        'relative gap (%)',
+    ]
+    print('\t'.join(cols))
+
+def _print_iter_info(nsol, nit, start_time, fval, uz, zbar):
+    '''Print a single line of the disp output.'''
+    rgap = 100*(1 - uz/zbar)
+    ttol = time() - start_time
+    cols = [str(nsol), str(nit), str(ttol), str(fval), str(rgap)]
+    print('\t'.join(cols))
 
 def _terminate(best_node, start_time, nit, maxiter):
     '''Termination: return the best node as the solution.'''
@@ -516,6 +535,8 @@ def intlinprog(
     cur_node.solve()
 
     # Let zbar be its optimal value
+    leaf_costs = dict()
+    leaf_costs[cur_node.id] = cur_node.z
     zbar = cur_node.z
 
     # Run the solver until the optimal solution is found or maxiter
@@ -523,6 +544,17 @@ def intlinprog(
     maxit = solver_options.get('maxiter', np.inf)
     nit = 0
     start_time = time()
+    num_feasible_sol = 0
+
+    # Set up disp header if needed
+    disp = solver_options.get('disp', False)
+    if disp:
+        _print_disp_hdr()
+        print_iter_info = lambda *args: _print_iter_info(
+            num_feasible_sol, nit, start_time,
+            cur_node.ilp.c @ cur_node.x, uz, zbar)
+    else:
+        print_iter_info = lambda *args: None
 
     # tag: terminate
     terminate = lambda *args: _terminate(
@@ -557,10 +589,14 @@ def intlinprog(
                         np.round(cur_node.x[integer_valued])):
 
                     # logging.info('Found integer solution!')
+                    num_feasible_sol += 1
+
                     # Change uz to z
                     uz = cur_node.z
+                    zbar = np.max([l for l in leaf_costs.values()])
                     # logging.info(
                     #     'Updated bounds: %g <= z* <= %g', uz, zbar)
+                    print_iter_info()
 
                     # If we did enough to change the bound, then we're
                     # the best so far
@@ -581,10 +617,10 @@ def intlinprog(
                     # variable in the LP solution
                     n1 = _Node(
                         cur_node.ilp, cur_node.z,
-                        depth=cur_node.depth+1)
+                        depth=cur_node.depth+1, parent_id=cur_node.id)
                     n2 = _Node(
                         cur_node.ilp, cur_node.z,
-                        depth=cur_node.depth+1)
+                        depth=cur_node.depth+1, parent_id=cur_node.id)
 
                     # Rule for branching: choose variable with largest
                     # residual as in [2]_.
@@ -605,9 +641,25 @@ def intlinprog(
 
                     # Put new division on the Queue
                     # logging.info('New nodes stashed in the Queue.')
+                    n1.solve()
+                    n2.solve()
+                    if n1.z is not None:
+                        leaf_costs[n1.id] = n1.z
+                    if n2.z is not None:
+                        leaf_costs[n2.id] = n2.z
+                    leaf_costs.pop(cur_node.id, None)
                     Q.put(n1)
                     Q.put(n2)
                     # GOTO: exhausted_test
+
+                # # The current node is now a leaf node
+                # leaf_costs[cur_node.id] = cur_node.z
+                #
+                # # The parent of this node has both children, so it is
+                # # no longer a leaf node
+                # if cur_node.is_second_child:
+                #     leaf_costs.pop(cur_node.parent_id, None)
+
 
         # tag: exhausted_test
         # Every subdivision analyzed completely?
@@ -632,26 +684,38 @@ def intlinprog(
             return terminate()
 
         # Solve linear program over subdivision
-        cur_node.solve()
+        # cur_node.solve()
         # logging.info('Solved node:')
         # logging.info(str(cur_node))
         # GOTO: LP_infeasibility_test
 
     # We should never reach here
-    raise ValueError('Something has gone terribly wrong...')
+    raise ValueError('ILP solver has failed.')
 
 if __name__ == '__main__':
-    # logging.basicConfig(level=logging.INFO)
-    c = [100, 150]
+    # # logging.basicConfig(level=logging.INFO)
+    # c = [100, 150]
+    # A = [
+    #     [8000, 4000],
+    #     [15, 30],
+    # ]
+    # b = [40000, 200]
+    # x0 = [0, 6]
+    # res = intlinprog(
+    #     c, A, b,
+    #     search_strategy='depth-first',
+    #     options={'maxiter': np.inf, 'disp': True},
+    #     x0=x0)
+    # print(res)
+
+    c = [300, 90, 400, 150]
     A = [
-        [8000, 4000],
-        [15, 30],
+        [35000, 10000, 25000, 90000],
+        [4, 2, 7, 3],
+        [1, 1, 0, 0],
     ]
-    b = [40000, 200]
-    x0 = [0, 6]
+    b = [120000, 12, 1]
     res = intlinprog(
         c, A, b,
-        search_strategy='depth-first',
-        options={'maxiter': np.inf},
-        x0=x0)
+        options={'disp': True})
     print(res)
