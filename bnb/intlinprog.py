@@ -1,6 +1,5 @@
 '''Interface for mixed integer linear programs.'''
 
-# import logging # use for debugging
 from queue import LifoQueue, Queue, PriorityQueue
 from time import time
 from collections import namedtuple
@@ -177,7 +176,9 @@ def  _process_intlinprog_args(
     return (_ILPProblem(
         c, A_ub, b_ub, A_eq, b_eq, binary, real_valued, bounds), x0)
 
-def _make_result(node, nit, maxiter, start_time, is_callback=False):
+def _make_result(
+        node, nit, num_integral_sol, maxiter, start_time,
+        is_callback=False):
     '''Make an OptimizeResult object from a search tree _Node.'''
 
     res = OptimizeResult()
@@ -236,6 +237,7 @@ def _make_result(node, nit, maxiter, start_time, is_callback=False):
     res['nit'] = nit
     res['x'] = node.x
     res['depth'] = node.depth
+    res['nsol'] = num_integral_sol
 
     # Make integer values true integers
     if node.x is not None:
@@ -289,7 +291,7 @@ def _print_iter_info(fmt, nsol, nit, start_time, fval, uz, zbar):
     ]
     print(fmt.format(*cols))
 
-def _terminate(best_node, start_time, nit, maxiter):
+def _terminate(best_node, start_time, nit, num_integral_sol, maxiter):
     '''Termination: return the best node as the solution.'''
     # z = uz is optimal => node corresponding to uz is
     # the solution node
@@ -297,7 +299,8 @@ def _terminate(best_node, start_time, nit, maxiter):
         msg = 'No solution found, returning empty node.'
         warn(msg, OptimizeWarning)
 
-    return _make_result(best_node, nit, maxiter, start_time)
+    return _make_result(
+        best_node, nit, num_integral_sol, maxiter, start_time)
 
 def intlinprog(
         c, A_ub=None, b_ub=None, A_eq=None, b_eq=None, binary=False,
@@ -363,7 +366,10 @@ def intlinprog(
                 solution.
             slack : 1-D array
                 The (nominally positive) values of the slack of the
-                associated linear program, ``b_ub - A_ub @ x``.
+                associated linear program, ``b_ub - A_ub @ x``.  More
+                slack variables may appear than in the original LP
+                relaxation due to additional constraints added during
+                the branch and bound search.
             con : 1-D array
                 The (nominally zero) residuals of the equality
                 constraints of the associated linear program,
@@ -384,6 +390,8 @@ def intlinprog(
             nit : int
                 The total number of iterations performed, i.e. the
                 number of nodes evaluated in the search tree.
+            nsol : int
+                The total number of integral soultions found so far.
             execution_time : float
                 The number of seconds taken to find the current node.
             depth : int
@@ -431,7 +439,9 @@ def intlinprog(
                 The (nominally positive) values of the slack
                 variables of the associated linear program which
                 satisfies all integral constraints;
-                ``b_ub - A_ub @ x``
+                ``b_ub - A_ub @ x``.  More slack variables may appear
+                than in the original LP relaxation due to additional
+                constraints added during the branch and bound search.
             con : 1-D array
                 The (nominally zero) residuals of the equality
                 constraints, ``b_eq - A_eq @ x``.
@@ -457,6 +467,8 @@ def intlinprog(
             nit : int
                 The total number of iterations performed, i.e. the
                 number of nodes evaluated in the search tree.
+            nsol : int
+                The total number of integral solutions found.
             execution_time : float
                 The number of seconds taken to find the optimal
                 solution with integral constraints.
@@ -487,6 +499,10 @@ def intlinprog(
     ``depth-first`` search strategy may be able to find them more
     quickly.
 
+    The relative optimality gap is reported when the ``disp`` option
+    is passed to ``intlinprog``.  When the gap is ``0``, optimality
+    has been demonstrated.
+
     References
     ----------
     .. [1] Bradley, Stephen P., Arnoldo C. Hax, and Thomas L.
@@ -515,7 +531,8 @@ def intlinprog(
         do_callback = lambda *args: None
     else:
         do_callback = lambda *args: callback(_make_result(
-            cur_node, nit, maxit, start_time, is_callback=True))
+            cur_node, nit, num_integral_sol, maxit, start_time,
+            is_callback=True))
 
     # Get options for both ILP and LP and let the _Node class know
     # what the LP options are
@@ -560,6 +577,8 @@ def intlinprog(
     cur_node.solve()
 
     # Let zbar be its optimal value
+    # zbar will be updated as the maximum of all feasible leaf nodes,
+    # whether or not they are integral (see [2]_ page C-9 step 6)
     leaf_costs = dict()
     leaf_costs[cur_node.id] = cur_node.z
     zbar = cur_node.z
@@ -569,21 +588,21 @@ def intlinprog(
     maxit = solver_options.get('maxiter', np.inf)
     nit = 0
     start_time = time()
-    num_feasible_sol = 0
+    num_integral_sol = 0 # cound how many integral solutions are found
 
     # Set up disp header if needed
     disp = solver_options.get('disp', False)
     if disp:
         table_fmt = _print_disp_hdr()
         print_iter_info = lambda *args: _print_iter_info(
-            table_fmt, num_feasible_sol, nit, start_time,
+            table_fmt, num_integral_sol, nit, start_time,
             cur_node.ilp.c @ cur_node.x, uz, zbar)
     else:
         print_iter_info = lambda *args: None
 
     # tag: terminate
     terminate = lambda *args: _terminate(
-        best_node, start_time, nit, maxit)
+        best_node, start_time, nit, num_integral_sol, maxit)
 
     # Start branchin' and boundin'
     while True:
@@ -592,7 +611,6 @@ def intlinprog(
         # Linear program infeasible over subdivision?
         # YES
         # if not cur_node.feasible:
-        #     logging.info('Node is infeasible!')
         #     # GOTO: exhausted_test
         # NO
         if cur_node.feasible:
@@ -601,7 +619,6 @@ def intlinprog(
             # YES
             # if cur_node.z <= uz:
             #     # Fathomed by bound
-            #     logging.info('Node fathomed by bound!')
             #     # GOTO exhausted_test
             # NO
             if cur_node.z > uz:
@@ -613,14 +630,12 @@ def intlinprog(
                         cur_node.x[integer_valued],
                         np.round(cur_node.x[integer_valued])):
 
-                    # logging.info('Found integer solution!')
-                    num_feasible_sol += 1
+                    # Found integer solution!
+                    num_integral_sol += 1
 
-                    # Change uz to z
+                    # Change uz to z -- update max upper bound zbar
                     uz = cur_node.z
-                    zbar = np.max([l for l in leaf_costs.values()])
-                    # logging.info(
-                    #     'Updated bounds: %g <= z* <= %g', uz, zbar)
+                    zbar = max(leaf_costs.values())
                     print_iter_info()
 
                     # If we did enough to change the bound, then we're
@@ -633,7 +648,6 @@ def intlinprog(
                         #     'Solution is optimal! Terminating.')
                         return terminate()
                     # NO -- fathomed by integrality
-                    # logging.info('Fathomed by integrality!')
                     # GOTO: exhausted_test
                 # NO
                 else:
@@ -657,14 +671,13 @@ def intlinprog(
                         idx, np.floor(cur_node.x[idx]))
                     n2.change_lower_bound(
                         idx, np.ceil(cur_node.x[idx]))
-                    # logging.info(
-                    #     'Generating new node with bounds: %s',
-                    #     str(n1.ilp.bounds))
-                    # logging.info(
-                    #     'Generating new node with bounds: %s',
-                    #     str(n2.ilp.bounds))
 
-                    # Put new division on the Queue
+                    # Put new division on the Queue -- nodes must be
+                    # solved now so the cost of all leaf nodes is
+                    # known in order to update zbar (tree upper
+                    # bound).  The parent node will be removed from
+                    # the set of leafs, as it is no longer a leaf
+                    # iself.
                     # logging.info('New nodes stashed in the Queue.')
                     n1.solve()
                     n2.solve()
@@ -677,21 +690,17 @@ def intlinprog(
                     Q.put(n2)
                     # GOTO: exhausted_test
 
-                # # The current node is now a leaf node
-                # leaf_costs[cur_node.id] = cur_node.z
-                #
-                # # The parent of this node has both children, so it is
-                # # no longer a leaf node
-                # if cur_node.is_second_child:
-                #     leaf_costs.pop(cur_node.parent_id, None)
-
-
         # tag: exhausted_test
         # Every subdivision analyzed completely?
         # YES
         if Q.empty():
-            # Termination
-            # logging.info('No nodes on the Queue, terminating!')
+            # No nodes on the queue: termination
+            # Assign the current node to be the best one and update
+            # lower and upper bounds for the tree
+            cur_node = best_node
+            uz = best_node.z
+            zbar = max(leaf_costs.values())
+            print_iter_info()
             return terminate()
         # NO
 
@@ -709,9 +718,9 @@ def intlinprog(
             return terminate()
 
         # Solve linear program over subdivision
-        # cur_node.solve()
-        # logging.info('Solved node:')
-        # logging.info(str(cur_node))
+        # Note: node solved before being put in queue as in [2]_.
+        # The step of updating the search tree's upper bound is
+        # curiously missing from the algorithm flow chart in [1]_.
         # GOTO: LP_infeasibility_test
 
     # We should never reach here
