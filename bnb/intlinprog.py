@@ -34,6 +34,7 @@ class _Node:
             self.ilp.A_eq, self.ilp.b_eq,
             bounds=self.ilp.bounds, method='revised simplex',
             options=self.lp_solver_options)
+        self.lp_res = lp_res
 
         if not lp_res['success']:
             self.feasible = False
@@ -41,7 +42,6 @@ class _Node:
             self.feasible = True
             self.z = -1*lp_res['fun']
             self.x = lp_res['x']
-            self.lp_res = lp_res
 
     def change_upper_bound(self, idx, upper):
         '''Constrain a single variable to be below a value.'''
@@ -175,14 +175,17 @@ def  _process_intlinprog_args(
     return (_ILPProblem(
         c, A_ub, b_ub, A_eq, b_eq, binary, real_valued, bounds), x0)
 
-def _make_result(node, nit, maxiter, start_time):
+def _make_result(node, nit, maxiter, start_time, is_callback=False):
     '''Make an OptimizeResult object from a search tree _Node.'''
 
     res = OptimizeResult()
 
     # messages unique to ILP OptimizeResult: status -> message
     messages = {
-        0 : 'Optimization terminated successfully (with optimal solution).',
+        0 : [
+            'Optimization terminated successfully (with optimal solution).',
+            'Optimization proceeding nominally.',
+        ],
         1 : [
             'Iteration limit reached with feasible solution (maybe suboptimal).',
             'Iteration limit reached without feasible solution.',
@@ -207,10 +210,10 @@ def _make_result(node, nit, maxiter, start_time):
     res['con'] = np.zeros(0)
     res['slack'] = np.zeros(0)
     if node.x is None:
-        # We only fail if we don't find a feasible solution,
-        # associated LP will know more about why we failed:
+        # We only fail if we don't find a feasible solution, the
+        # associated LP result will know more about why we failed
         res['success'] = False
-        res['status'] = node.ilp.lp_res['status']
+        res['status'] = node.lp_res['status']
     else:
         # Info about associated LP solution
         if node.ilp.A_eq is not None:
@@ -221,6 +224,9 @@ def _make_result(node, nit, maxiter, start_time):
         # If we have a feasible solution then we declare success
         res['success'] = True
         if 'status' not in res:
+            # Resolve status 0 message into a single message based
+            # on whether we are in a callback or not
+            messages[0] = messages[0][is_callback]
             res['status'] = 0
 
     res['execution_time'] = time() - start_time
@@ -250,7 +256,7 @@ def _terminate(best_node, start_time, nit, maxiter):
 def intlinprog(
         c, A_ub=None, b_ub=None, A_eq=None, b_eq=None, binary=False,
         real_valued=None, bounds=None, search_strategy='depth-first',
-        options=None, lp_options=None, x0=None):
+        callback=None, options=None, lp_options=None, x0=None):
     '''Use branch and bound to solve mixed integer linear programs.
 
     Parameters
@@ -295,6 +301,46 @@ def intlinprog(
         the search tree.  By default `'depth-first'` is chosen.  "The
         `'depth-first'` variant is recommended ... because it quickly
         produces full solutions, and therefore upper bounds" [3]_.
+    callback : callable, optional
+        If a callback function is provided, it will be called at least
+        once per iteration of the algorithm. The callback function
+        must accept a single `scipy.optimize.OptimizeResult`
+        consisting of the following fields:
+
+            x : 1-D array
+                The current solution vector of the associated linear
+                program (may or may not be integral feasible).
+            fun : float
+                The current value of the objective function ``c @ x``.
+            success : bool
+                ``True`` when the algorithm has found a feasible
+                solution.
+            slack : 1-D array
+                The (nominally positive) values of the slack of the
+                associated linear program, ``b_ub - A_ub @ x``.
+            con : 1-D array
+                The (nominally zero) residuals of the equality
+                constraints of the associated linear program,
+                ``b_eq - A_eq @ x``.
+            status : int
+                An integer representing the status of the algorithm.
+
+                ``0`` : Optimization proceeding nominally.
+
+                ``1`` : Iteration limit reached.
+
+                ``2`` : Problem appears to be infeasible.
+
+                ``3`` : Problem appears to be unbounded.
+
+                ``4`` : Numerical difficulties encountered.
+
+            nit : int
+                The current iteration number (number of nodes
+                evaluated in the search tree).
+            message : str
+                A string descriptor of the algorithm status.
+
     options : dict, optional
         A dictionary of integer linear programming solver options. The
         following fields are accepted options:
@@ -398,6 +444,17 @@ def intlinprog(
         # describe requirements on variables, but the correct
         # Exception is probably ValueError:
         raise ValueError(str(e))
+
+    # The callback with always be called, so make sure it's actually
+    # callable
+    if callback is None:
+        do_callback = lambda *args: None
+    elif not callable(callback):
+        warn('callback is not callable! Ignoring.', OptimizeWarning)
+        do_callback = lambda *args: None
+    else:
+        do_callback = lambda *args: callback(_make_result(
+            cur_node, nit, maxit, start_time, is_callback=True))
 
     # Get options for both ILP and LP and let the _Node class know
     # what the LP options are
@@ -539,6 +596,10 @@ def intlinprog(
             # logging.info('No nodes on the Queue, terminating!')
             return terminate()
         # NO
+
+        # Call callback before we grab the next node from the Queue
+        do_callback()
+
         # Select subdivision not yet analyzed completely
         cur_node = Q.get()
 
